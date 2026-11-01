@@ -73,3 +73,25 @@ def drawing_label(symbol: str) -> str:
         parts = parts[1:]  # rig code (PTS, RY, ...)
     words = [w for p in parts for w in re.sub(r"(?<=[a-z])(?=[A-Z])", " ", p).split()]
     return " ".join(words)
+
+
+def part_for_slot(char: Character, slot: str) -> list[str]:
+    """Bones a plain click on `slot`'s artwork selects.
+
+    Face features select their part (an eye's iris, pupil, highlights or white
+    all select that eye's look); anything else in a child rig selects the
+    control that carries the rig (the head); body pieces select the body.
+    """
+    for _, bones in parts(char):
+        if slot in bones:
+            return bones
+    s = char.all_slots()[slot]
+    if s.masked_by:
+        for label, bones in parts(char):
+            if label.startswith("Eye") and char.all_slots()[bones[0]].masked_by == s.masked_by:
+                return bones
+    if s.rig != char.root_rig:
+        holder = next((h.name for h in char.all_slots().values() if h.child_rig == s.rig), None)
+        if holder:
+            return [holder]
+    return [ROOT]

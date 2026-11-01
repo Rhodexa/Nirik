@@ -203,6 +203,82 @@ def test_card_origins_share_one_line():
     assert len({round(o.matrix_world.translation.y, 7) for o in cards}) == len(cards)
 
 
+def _artwork_point(arm, char, slot, want_mask=True):
+    """World point on `slot`'s current drawing (opaque texel), optionally where
+    its mask is open (True) or closed (False)."""
+    from mathutils import Vector
+    from nirik.bridge import picking
+    dg = bpy.context.evaluated_depsgraph_get()
+    card = bpy.data.objects[f"twilight:{slot}"].evaluated_get(dg)
+    v0, v1, _, v3 = (card.matrix_world @ v.co for v in card.data.vertices)
+    alpha = picking.drawing_alpha(char, arm.pose.bones[slot]["nirik_drawing"])
+    mask = char.all_slots()[slot].masked_by
+    ys, xs = np.nonzero(alpha > 0.9)
+    cy, cx = ys.mean(), xs.mean()
+    for i in np.argsort((ys - cy) ** 2 + (xs - cx) ** 2):  # central texels first
+        u, v = (xs[i] + 0.5) / alpha.shape[1], (ys[i] + 0.5) / alpha.shape[0]
+        point = v0 + (v1 - v0) * u + (v3 - v0) * v
+        m = picking._mask_alpha(arm, char, mask, point, dg) if mask else 1.0
+        if mask is None or (m > 0.9 if want_mask else m < 0.05):
+            return Vector((point.x, point.y - 2, point.z))  # ray origin in front of the plane
+    return None
+
+
+def test_pick_eye_selects_the_look():
+    from mathutils import Vector
+    from nirik.bridge import picking
+    from nirik.core import controls
+    from nirik.ui import character_for
+    arm = state["arm"]
+    arm.animation_data_clear()
+    char = character_for(arm)
+    rig_build.apply_construction(arm, char, "Character", 4)
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    origin = _artwork_point(arm, char, "Head.PUPIL")
+    stack = [h.slot for h in picking.hits(arm, char, origin, Vector((0, 1, 0)), dg)]
+    assert stack and stack[0] in ("Head.PUPIL", "Head.HIGHLIGHTS")
+    eyes = [bones for label, bones in controls.parts(char) if label.startswith("Eye")]
+    assert controls.part_for_slot(char, stack[0]) in eyes
+    assert stack[0] in controls.part_for_slot(char, stack[0])
+
+
+def test_pick_skips_transparent_and_masked_artwork():
+    from mathutils import Vector
+    from nirik.bridge import picking
+    from nirik.ui import character_for
+    arm = state["arm"]
+    char = character_for(arm)
+    dg = bpy.context.evaluated_depsgraph_get()
+    assert picking.hits(arm, char, Vector((5, -2, 5)), Vector((0, 1, 0)), dg) == []
+    hidden_iris = _artwork_point(arm, char, "Head.IRIS", want_mask=False)
+    if hidden_iris is not None:  # iris artwork that the eyelid mask hides
+        stack = [h.slot for h in picking.hits(arm, char, hidden_iris, Vector((0, 1, 0)), dg)]
+        assert "Head.IRIS" not in stack
+
+
+def test_auto_sync_after_retiming():
+    from nirik.bridge import sync
+    from nirik.ui import character_for
+    arm = state["arm"]
+    char = character_for(arm)
+    arm.animation_data_clear()
+    rig_build.apply_construction(arm, char, "Character", 0, frame=1)
+    rig_build.apply_construction(arm, char, "Character", 30, frame=10)
+    sync.mark_synced(arm)
+    assert not sync.out_of_sync(arm)
+    fc = next(f for f in _fcurves(arm) if f.data_path == 'pose.bones["ROOT"]["nirik_construction"]')
+    fc.keyframe_points[1].co.x = 20
+    assert sync.out_of_sync(arm)
+    sync._run(arm.name)  # what the timer does after the depsgraph handler notices
+    assert not sync.out_of_sync(arm)
+    # Body sockets follow the moved body key; the head keeps its own key at 10.
+    socket_frames = {kp.co.x for f in _fcurves(arm)
+                     if f.data_path.startswith('pose.bones["Character.') and ".SOCKET" in f.data_path
+                     for kp in f.keyframe_points}
+    assert 20 in socket_frames and 10 not in socket_frames
+
+
 def test_swapped_drawing_renders():
     # Two different mouths must render differently: the new tile is live.
     arm = state["arm"]

@@ -95,3 +95,11 @@ def test_drawing_labels():
     assert drawing_label("PTS_HindLeg_3-4nomark") == "Hind Leg 3-4nomark"
     assert drawing_label("RY_Mouth_3-4") == "Mouth 3-4"
     assert drawing_label("table_top") == "table top"
+
+
+def test_click_on_slot_selects_its_part(tmp_path):
+    from nirik.core.controls import part_for_slot
+    ch = L.load(write_library(tmp_path))
+    assert part_for_slot(ch, "Head.IRIS") == ["Head.IRIS"]        # eye look
+    assert part_for_slot(ch, "Head.SKULL") == ["Character.HEAD"]  # rest of the face -> head
+    assert part_for_slot(ch, "Character.Tail") == ["ROOT"]        # body pieces -> body

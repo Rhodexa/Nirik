@@ -1,7 +1,8 @@
 import bpy
-from bpy.props import EnumProperty, IntProperty, StringProperty
+from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
+from bpy_extras import view3d_utils
 
-from ..bridge import rig_build
+from ..bridge import picking, rig_build, sync
 from ..core import controls, library
 
 _characters: dict[str, library.Character] = {}  # disposable cache: library path -> Character
@@ -37,6 +38,22 @@ def part_label(arm, char, slot: str) -> str:
     return controls.drawing_label(drawing.symbol) if drawing else controls.label(slot)
 
 
+def select_bones(arm, char, names: list[str], extend: bool = False):
+    """Select `names` (Pose mode). Extra controls are hidden one by one; only
+    the picked ones are revealed."""
+    main = controls.main_bones(char)
+    slots = char.all_slots()
+    for pb in arm.pose.bones:
+        if pb.name in names:
+            pb.select = True
+        elif not extend:
+            pb.select = False
+        if pb.name in slots and pb.name not in main:
+            pb.hide = not pb.select
+    if names:
+        arm.data.bones.active = arm.data.bones[names[0]]
+
+
 def autokey_frame(context) -> int | None:
     ts = context.scene.tool_settings
     return context.scene.frame_current if ts.use_keyframe_insert_auto else None
@@ -65,6 +82,7 @@ class NIRIK_OT_load_character(bpy.types.Operator):
             bpy.ops.object.mode_set(mode="OBJECT")
         arm = rig_build.build(char)
         rig_build.apply_construction(arm, char, char.root_rig, 0)
+        sync.mark_synced(arm)
         for ob in context.selected_objects:
             ob.select_set(False)
         arm.select_set(True)
@@ -91,6 +109,7 @@ class NIRIK_OT_step_construction(bpy.types.Operator):
         total = len(char.rigs[self.rig].constructions)
         cid = (rig_build.current_construction(arm, char, self.rig) + self.step) % total
         rig_build.apply_construction(arm, char, self.rig, cid, autokey_frame(context))
+        sync.mark_synced(arm)
         redraw_viewports(context)
         return {"FINISHED"}
 
@@ -112,13 +131,61 @@ class NIRIK_OT_select_part(bpy.types.Operator):
         if context.mode != "POSE":
             bpy.ops.object.mode_set(mode="POSE")
         names = [n for n in self.bones.split(",") if n in arm.data.bones]
-        main = controls.main_bones(character_for(arm))
-        for pb in arm.pose.bones:
-            pb.select = pb.name in names
-            if pb.name in character_for(arm).all_slots() and pb.name not in main:
-                pb.hide = pb.name not in names  # show only the extra part you picked
-        if names:
-            arm.data.bones.active = arm.data.bones[names[0]]
+        select_bones(arm, character_for(arm), names)
+        return {"FINISHED"}
+
+
+_last_pick: dict = {}  # Alt+click cycling: position, stack under the cursor, index
+
+
+class NIRIK_OT_pick(bpy.types.Operator):
+    """Select the part under the cursor by clicking its artwork"""
+    bl_idname = "nirik.pick"
+    bl_label = "Pick Part"
+    bl_options = {"REGISTER", "UNDO"}
+
+    mode: EnumProperty(items=(
+        ("PART", "Part", "The part a click means: a face feature, the head, or the body"),
+        ("EXACT", "Exact", "The exact piece under the cursor"),
+        ("CYCLE", "Cycle", "Step through every piece stacked under the cursor"),
+    ), default="PART")
+    extend: BoolProperty(default=False)
+
+    @classmethod
+    def poll(cls, context):
+        return (nirik_armature(context) is not None and context.mode == "POSE"
+                and context.region is not None and context.region.type == "WINDOW")
+
+    def invoke(self, context, event):
+        # Bound to both mouse buttons; act only on the user's select button.
+        prefs = context.window_manager.keyconfigs.active.preferences
+        select = getattr(prefs, "select_mouse", "LEFT") if prefs else "LEFT"
+        if event.type != f"{select}MOUSE":
+            return {"PASS_THROUGH"}
+        arm = nirik_armature(context)
+        char = character_for(arm)
+        coord = (event.mouse_region_x, event.mouse_region_y)
+        rv3d = context.region_data
+        origin = view3d_utils.region_2d_to_origin_3d(context.region, rv3d, coord)
+        direction = view3d_utils.region_2d_to_vector_3d(context.region, rv3d, coord)
+        found = picking.hits(arm, char, origin, direction, context.evaluated_depsgraph_get())
+        if not found:
+            return {"PASS_THROUGH"}  # empty space: Blender's own selection
+        stack = [h.slot for h in found]
+
+        if self.mode == "CYCLE":
+            last = _last_pick
+            near = last.get("stack") == stack and abs(last["x"] - coord[0]) + abs(last["y"] - coord[1]) < 6
+            index = (last["index"] + 1) % len(stack) if near else 0
+            _last_pick.update(x=coord[0], y=coord[1], stack=stack, index=index)
+            names = [stack[index]]
+        elif self.mode == "EXACT":
+            names = [stack[0]]
+        else:
+            names = controls.part_for_slot(char, stack[0])
+        select_bones(arm, char, names, self.extend)
+        label = part_label(arm, char, stack[0]) if self.mode != "CYCLE" else part_label(arm, char, names[0])
+        self.report({"INFO"}, label if self.mode != "CYCLE" else f"{label} ({index + 1}/{len(stack)})")
         return {"FINISHED"}
 
 
@@ -158,6 +225,7 @@ class NIRIK_OT_step_drawing(bpy.types.Operator):
         frame = autokey_frame(context)
         if frame is not None:
             rig_build.key_drawing(arm, slot, frame)
+            sync.mark_synced(arm)
         redraw_viewports(context)
         return {"FINISHED"}
 
@@ -206,7 +274,6 @@ class NIRIK_PT_main(bpy.types.Panel):
         row = box.row(align=True)
         row.operator("screen.keyframe_jump", text="Prev Key", icon="PREV_KEYFRAME").next = False
         row.operator("screen.keyframe_jump", text="Next Key", icon="NEXT_KEYFRAME").next = True
-        box.operator("nirik.rebuild", icon="FILE_REFRESH")
 
         slot = active_slot(context, char)
         box = layout.box()
@@ -235,7 +302,7 @@ class NIRIK_OT_rebuild(bpy.types.Operator):
     """Re-sync the rig's hidden channels with the visible construction and
     drawing keys (after moving or deleting them in the Dope Sheet)"""
     bl_idname = "nirik.rebuild"
-    bl_label = "Sync After Retiming"
+    bl_label = "Nirik: Re-sync Keys"
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
@@ -244,7 +311,7 @@ class NIRIK_OT_rebuild(bpy.types.Operator):
 
     def execute(self, context):
         arm = nirik_armature(context)
-        rig_build.rebuild_compiled(arm, character_for(arm))
+        sync.sync_now(arm, character_for(arm))
         context.scene.frame_set(context.scene.frame_current)
         redraw_viewports(context)
         return {"FINISHED"}
@@ -283,7 +350,7 @@ class NIRIK_PT_more(bpy.types.Panel):
                 op.bones = name
 
 
-classes = (NIRIK_OT_load_character, NIRIK_OT_step_construction, NIRIK_OT_select_part,
+classes = (NIRIK_OT_load_character, NIRIK_OT_step_construction, NIRIK_OT_select_part, NIRIK_OT_pick,
            NIRIK_OT_step_drawing, NIRIK_OT_rebuild, NIRIK_PT_main, NIRIK_PT_more)
 _keymaps = []
 
@@ -291,9 +358,18 @@ _keymaps = []
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
+    sync.register()
     kc = bpy.context.window_manager.keyconfigs.addon
     if kc:
         km = kc.keymaps.new(name="Pose", space_type="EMPTY")
+        for button in ("LEFTMOUSE", "RIGHTMOUSE"):
+            for value, mods, mode, extend in (("PRESS", {}, "PART", False),
+                                              ("PRESS", {"shift": True}, "PART", True),
+                                              ("PRESS", {"alt": True}, "CYCLE", False),
+                                              ("DOUBLE_CLICK", {}, "EXACT", False)):
+                kmi = km.keymap_items.new("nirik.pick", button, value, **mods)
+                kmi.properties.mode, kmi.properties.extend = mode, extend
+                _keymaps.append((km, kmi))
         for key, step in (("WHEELUPMOUSE", -1), ("WHEELDOWNMOUSE", 1)):
             for ctrl, scope in ((False, "SYMBOL"), (True, "SLOT")):
                 kmi = km.keymap_items.new("nirik.step_drawing", key, "PRESS", alt=True, ctrl=ctrl)
@@ -302,6 +378,7 @@ def register():
 
 
 def unregister():
+    sync.unregister()
     for km, kmi in _keymaps:
         km.keymap_items.remove(kmi)
     _keymaps.clear()
