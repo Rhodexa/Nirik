@@ -1,0 +1,357 @@
+ want to design a Blender add-on/workflow for animating 2D, My Little Pony-style characters inside predominantly 3D/live-action-looking environments. The attached cockpit image is representative of the intended visual result.
+
+Context
+
+I am experienced with Blender and animation and can develop custom tooling/add-ons with Claude Code. I also have a drawing tablet.
+
+I already have a substantial library of original character animation assets available to my tooling, including things like heads, mouths, eyes, body components, poses, etc. I have spent roughly a year developing a renderer/importer capable of reading the source animation data and rendering its SVG/vector artwork accurately. It can already rasterize these assets reliably, so this project does NOT need to solve extraction/rendering of the source assets from scratch.
+
+The goal is also NOT to recreate Adobe Flash/Animate inside Blender or perfectly reproduce the original show's animation pipeline.
+
+The goal is to create a practical hybrid animation system where reusable 2D artwork, newly drawn artwork, Blender animation, and Blender's 3D environment/compositing tools can coexist naturally.
+
+The immediate test case is a mostly static cockpit shot with Twilight Sparkle and Rarity discussing aircraft standard operating procedures. The characters are graphically 2D/cel-like while the cockpit, lighting, camera, atmosphere, etc. can remain fully 3D.
+
+Fundamental problem
+
+Blender's normal animation philosophy assumes:
+
+persistent model → persistent rig → animation
+
+Traditional/Flash-like 2D animation frequently violates that assumption. A character's construction can fundamentally change between poses or even frames.
+
+Therefore I want something closer to:
+
+persistent animation controls
+        ↓
+replaceable construction
+        ↓
+replaceable drawings/assets
+
+The rig should serve the drawings rather than forcing every drawing into one permanent topology.
+
+Proposed architecture
+
+Treat a character as a hierarchical 2D puppet existing in Blender's 3D scene.
+
+For example:
+
+Character Root
+    Body
+    Head
+        Eyes
+        Mouth
+        Ears
+        Mane Front
+    Foreleg
+    Wing
+    Mane Back
+
+These are conceptual animation slots/controllers, NOT necessarily permanent meshes.
+
+Each slot can display a rasterized/vector-derived character asset. Assets can be swapped over time using stepped/constant keyframes, analogous to symbol swapping/exposures in Flash.
+
+Example mouth timeline:
+
+F105  REST
+F108  A
+F110  E
+F113  REST
+
+The Blender Dope Sheet therefore partly functions as an exposure sheet.
+
+Registration and attachment system
+
+Assets need metadata describing things such as:
+
+character
+body part / slot
+orientation
+expression
+pivot / registration point
+attachment points
+tags
+
+The important principle is:
+
+attachment belongs to the SLOT;
+registration information belongs to the DRAWING.
+
+Therefore swapping one mouth/head/etc. for another does not require manually repositioning it.
+
+This recreates the useful concept of Flash symbol registration without requiring Flash itself.
+
+Three levels of animation
+
+The system should deliberately mix three techniques:
+
+1. TRANSFORM ANIMATION
+
+Cheap reusable movement using Blender transforms:
+
+- head translation/rotation
+- torso movement
+- ear rotation
+- eye movement
+- limbs
+- subtle mane motion
+- squash/stretch at controller level
+
+2. LIMITED DEFORMATION
+
+Some drawings can optionally sit on simple deformable meshes/bones/lattices.
+
+This is NOT intended to create a universally deformable puppet. It should provide modest bending, squash/stretch, arcs, etc.
+
+3. REPLACEMENT DRAWINGS
+
+When deformation stops looking good, replace the artwork.
+
+This is intentional rather than a failure of the rig.
+
+The animator should be able to introduce a completely different drawing or construction for a particular pose/frame.
+
+The desired philosophy is:
+
+reuse → transform → deform → redraw when necessary
+
+rather than:
+
+construct one universal rig capable of every pose
+
+Variable character construction / Pose Sets
+
+Different poses may require different internal construction.
+
+Example:
+
+NORMAL_3Q
+    Head
+    EyeL
+    EyeR
+    Mouth
+    EarL
+    EarR
+    ManeFront
+
+EXTREME_WORRIED
+    HeadComposite
+    Mouth
+
+LOOKING_DOWN
+    HeadDown
+    EyeL
+    EyeR
+    MouthDown
+    ManeDown
+
+A "Pose Set" or equivalent system could switch which slots/construction are active while preserving the character's higher-level animation controls.
+
+Thus topology, layering and even rig structure can change during animation.
+
+2.5D integration
+
+The characters can consist of several closely spaced image planes/cards in 3D space.
+
+Conceptually:
+
+eye highlights
+eyes
+front mane
+muzzle/mouth
+head
+ears/horn
+near foreleg
+torso
+far foreleg
+wing
+rear mane
+
+These can have tiny depth differences, allowing:
+
+- correct occlusion
+- limited parallax
+- interaction with 3D cockpit geometry
+- depth ordering
+- camera perspective
+- DOF/compositing integration
+
+The cockpit remains genuinely 3D.
+
+The character remains fundamentally a drawing.
+
+Small differences in layer movement could create subtle pseudo-volume without requiring a 3D pony model.
+
+Rendering philosophy
+
+The character probably should NOT receive conventional physically based 3D shading.
+
+Character artwork can be largely unlit/emissive so its graphic 2D appearance remains stable.
+
+Environmental integration can happen afterward through compositing:
+
+- subtle environmental color influence
+- warm/cool lighting tint
+- atmospheric haze
+- bloom/light spill
+- glass reflections
+- contact-shadow/AO proxies
+- grain
+- slight softness
+- depth effects
+
+The objective is not physically correct lighting on a cartoon character.
+
+The objective is for a fundamentally 2D character to look convincingly composited into a photographed/rendered environment.
+
+Replacement-drawing workflow
+
+Ideally an animator can select something like:
+
+Rarity.Head
+
+at the current frame and choose:
+
+Create Replacement Drawing
+
+The system could then:
+
+1. export/render the current construction at high resolution;
+2. optionally provide previous/next-frame onion skins;
+3. generate a transparent drawing template;
+4. open it in an external painting program;
+5. allow tablet drawing/editing;
+6. detect/reload the saved artwork;
+7. register it into the character asset library;
+8. expose it automatically at the current frame.
+
+Blender remains the animation/layout/compositing environment rather than trying to become a full raster painting application.
+
+External asset library
+
+Do not necessarily embed thousands of character assets in every .blend.
+
+Something like:
+
+characters/
+    twilight/
+        character.json
+        head/
+        eyes/
+        mouths/
+        mane/
+        ears/
+        wings/
+        legs/
+        custom/
+
+    rarity/
+        ...
+
+Blender refers to asset IDs and metadata.
+
+The underlying artwork could originate from my existing SVG renderer, rasterized source assets, hand-painted PNGs, procedural output, etc. The animation system should ideally not care where an asset originated.
+
+Exposure-based animation
+
+Final output might be 24 fps while character animation intentionally uses held drawings / animation on twos or variable exposures.
+
+For example:
+
+3D environment     24 fps continuous
+camera             24 fps continuous
+character poses    often 12 fps / held
+mouth animation    variable exposures
+effects            24 fps
+
+Avoid automatically smoothing everything. Stepped timing is part of the intended 2D animation language.
+
+Dialogue
+
+Lip sync could eventually be semi-automated.
+
+An automated system might create a rough exposure sequence:
+
+REST → A → E → REST → O → FV → A → REST
+
+The animator then edits it manually.
+
+Mouth assets should ideally be contextual:
+
+character
+    expression
+        orientation
+            phoneme
+
+rather than treating mouths as universal decals.
+
+Acting through eyes, brows, head movement, posture, etc. is more important than mechanically perfect phoneme matching.
+
+Nested/animated symbols
+
+Eventually a slot could contain either a static asset OR an internally animated sequence.
+
+For example:
+
+Mane = idle_loop
+
+where:
+
+idle_loop
+    mane_01
+    mane_02
+    mane_03
+    mane_04
+
+This would provide something analogous to nested Flash symbols while still living inside Blender's scene/timeline system.
+
+Proposed minimum viable Blender add-on
+
+Rather than immediately recreating an entire animation package, the first prototype could implement approximately:
+
+1. Sprite Slot object/controller
+   Holds one registered visual asset and supports keyframed asset swapping.
+
+2. Visual Asset Browser
+   Thumbnail selection filtered by character, body part, orientation, expression, etc.
+
+3. Registration/Attachment System
+   Assets know pivots and attachment points so replacements align automatically.
+
+4. Pose Sets
+   Allows character construction to change while retaining higher-level controls.
+
+5. Replacement Drawing Workflow
+   Export current pose → paint externally → reload/register/expose.
+
+6. Exposure Sheet UI
+   A convenient representation of which assets are exposed on which frames.
+
+Then use the existing Twilight/Rarity asset libraries to animate roughly 10 seconds of the cockpit scene and discover what tooling is actually missing before expanding the architecture.
+
+What I want you to evaluate
+
+Please independently critique this architecture rather than simply agreeing with it.
+
+In particular:
+
+- How would you implement this cleanly within Blender's actual data model and Python API?
+- Is an image-plane/card approach actually the right foundation, or is there a better Blender-native representation?
+- How should asset swapping be implemented without creating thousands of objects/materials or destroying viewport performance?
+- How should registration points and hierarchical attachments work?
+- What should remain Blender-native versus being managed by the add-on?
+- How should Pose Sets / variable character construction work?
+- How can topology/rigging legitimately change over time without making animation editing unbearable?
+- How should deformation and replacement drawings coexist?
+- How would you implement exposure timing and stepped animation?
+- How should depth ordering work for 2.5D characters?
+- What data should live in the .blend versus the external character library?
+- How should undo, dependency updates, caching, proxies, thumbnails and file reloads work?
+- How would you structure the add-on internally so that it remains maintainable?
+- Which parts of this design are likely to fight Blender and should be redesigned?
+- Are there established 2D/cutout/anime animation techniques that suggest a substantially better architecture?
+- What would you build as the smallest serious prototype before committing to the complete system?
+
+Assume I am comfortable writing substantial custom tooling and that Claude Code can inspect Blender's APIs, prototype implementations and test technical feasibility.
+
+The end goal is not merely "2D animation in Blender." It is a Blender-based animation environment where a character can remain fundamentally a collection of drawings, where those drawings and even their construction can change freely over time, while still gaining Blender's 3D layout, camera, scene, compositing, rendering and Python/tooling capabilities.

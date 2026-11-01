@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.blend1
+*.blend2
+/cache/
+/out/
+*.fla
+*.zip
+*.7z
+.venv/
+dist/

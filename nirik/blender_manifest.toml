@@ -1,0 +1,15 @@
+schema_version = "1.0.0"
+
+id = "nirik"
+version = "0.0.1"
+name = "Nirik"
+tagline = "Drawing-based 2D puppets that live in 3D scenes"
+maintainer = "Rhodexa <rhodexartist@gmail.com>"
+type = "add-on"
+
+blender_version_min = "5.2.0"
+
+license = ["SPDX:GPL-3.0-or-later"]
+
+[build]
+paths_exclude_pattern = ["__pycache__/", "*.pyc"]

@@ -1,0 +1,298 @@
+Your architecture critique is useful and I want to retain it as the baseline. I now want a focused second-pass review of several areas that were not specified deeply enough.
+
+Do NOT redesign the entire system unless these requirements expose a fundamental flaw. Treat this as an addendum to the previous architecture.
+
+1. Viewport selection and animator interaction
+
+What does actually manipulating one of these characters feel like?
+
+Suppose Twilight is visible in the Blender viewport.
+
+I want to select her head.
+
+Do I:
+
+- click directly on the rendered head artwork?
+- click an overlaid controller around the head?
+- select a Head CTRL bone?
+- select Head from a hierarchy/tree?
+- use some combination depending on mode?
+
+How should hit-testing work when many transparent cards overlap?
+
+For example, clicking Twilight's face might potentially hit:
+
+- mane
+- eye
+- iris
+- mouth
+- head
+- ear
+- composite outline pieces
+
+The animator should not have to fight Blender's normal object-selection rules constantly.
+
+Design a practical viewport interaction model.
+
+Consider visible controller overlays, selection cycling, modifier-click behavior, locking/unlocking levels of hierarchy, and selecting conceptual controls rather than raw render cards.
+
+Could Blender gizmos/custom bone shapes provide a good interaction surface?
+
+Should render cards normally be non-selectable?
+
+2. Parent transforms and dependency behavior
+
+Suppose I select "Head CTRL" and scale, rotate or translate it.
+
+The entire visual head should behave as one unit, including:
+
+- head artwork
+- eyes
+- irises/pupils
+- mouth
+- ears if appropriate
+- horn
+- mane components attached to the head
+- masks associated with these components
+
+But I must still be able to select Eye CTRL or Mouth CTRL and transform those relative to the transformed head.
+
+Explain exactly how this works with your proposed SOCKET → CTRL hierarchy.
+
+What happens when:
+
+- Head is scaled non-uniformly?
+- Head is flipped?
+- Head has affine skew?
+- a child drawing changes and therefore changes its socket position?
+- the entire character is scaled?
+- a construction switches while parent controls are transformed?
+
+Which transforms belong to animator controls versus compiler-owned sockets?
+
+3. Composite slots versus render components
+
+I suspect the previous model conflates an animator-facing slot with a rendered card.
+
+These may need to be separate concepts.
+
+For example, an animator may perceive:
+
+Eye
+
+as one semantic component, but rendering may require:
+
+Eye
+    sclera
+    iris
+    pupil
+    highlight
+    clipping mask
+
+Likewise a Head drawing may internally consist of:
+
+Head
+    fill
+    rear outline
+    front outline
+    masks
+
+The animator normally wants to manipulate "Head" or "Eye", not all these implementation pieces.
+
+Should the architecture distinguish:
+
+CONTROL / SLOT
+    animator-facing semantic unit
+
+DRAWING / ATTACHMENT
+    exposed artwork/state
+
+RENDER COMPONENT
+    one or more actual cards/passes required to render that drawing
+
+Evaluate whether this distinction belongs in the data model.
+
+4. Clipping and masks
+
+Traditional Flash/vector rigs frequently depend on clipping.
+
+Example:
+
+An eye contains a sclera/eye shape plus an iris and pupil. The iris can move freely, but anything outside the eye opening is clipped.
+
+How should this work in Blender?
+
+Requirements:
+
+- mask moves/scales with the appropriate parent
+- iris/pupil remain independently animatable
+- masks can change when drawings change
+- masks may themselves be vector-derived/rasterized
+- masking should survive draw-order changes
+- viewport playback must remain fast
+- final rendering should be deterministic
+- avoid per-frame Python compositing if possible
+
+Compare viable Blender implementations such as:
+
+- shader alpha masks
+- stencil-like approaches
+- shared texture/atlas masks
+- geometry masks
+- compositor masks
+- precomposed subtrees where appropriate
+
+Recommend a production architecture.
+
+5. Split outlines and interleaved rendering
+
+Some source animation techniques separate a shape's fill and outline.
+
+This allows situations conceptually like:
+
+head rear outline
+head fill
+eye
+mouth
+foreground component
+head front outline
+
+or other combinations where parts of one conceptual drawing need to render on opposite sides of another slot.
+
+Therefore one slot/drawing may require multiple render components at different positions in the global draw order.
+
+How should the data model represent this?
+
+Can one Drawing ID produce several render components, each with:
+
+- texture/atlas region
+- mask
+- local transform
+- draw-order relationship
+- color transform
+- visibility
+
+without exposing all of those as animator-facing objects?
+
+How does this interact with the shot-atlas approach and the compiled draw-order system?
+
+6. Nested masks and nested symbols
+
+Original Flash-style assets can contain nested structures.
+
+For example:
+
+Head
+    EyeSymbol
+        sclera
+        IrisSymbol
+            iris
+            pupil
+            highlight
+        eye mask
+    MouthSymbol
+    ManeSymbol
+
+Some nested symbols may have their own timelines.
+
+How much of this hierarchy should survive into the Blender representation?
+
+Should the importer flatten aggressively into render components, preserve semantic subtrees, or use a hybrid?
+
+We want enough hierarchy for useful animation without reproducing the entire Flash display-list implementation unnecessarily.
+
+7. Controller visualization
+
+Design how an animator can understand the invisible rig while looking at the finished character.
+
+I am imagining optional viewport overlays such as:
+
+- head boundary/control
+- eye controls
+- mouth control
+- body/root control
+- attachment/socket positions
+- active masks
+- slot names
+- current drawing IDs/names
+- draw-order indicators
+
+Perhaps different display modes:
+
+CLEAN
+CONTROLS
+SLOTS
+SOCKETS
+RENDER DEBUG
+
+The character should remain pleasant to animate rather than becoming a forest of Blender bones.
+
+What can realistically be implemented with Blender's Python API, custom bone shapes, gizmos and viewport draw handlers?
+
+8. Direct manipulation versus asset selection
+
+A common workflow might be:
+
+1. click Twilight's head;
+2. transform it;
+3. press a shortcut to open the Head drawing browser;
+4. see compatible head drawings as thumbnails;
+5. click a replacement;
+6. continue animating.
+
+Likewise:
+
+1. click mouth;
+2. thumbnail browser automatically filters to:
+   Twilight / Mouth / current head angle / current expression
+3. choose another mouth;
+4. exposure is keyed automatically at the current frame.
+
+Design this interaction in concrete terms.
+
+Which actions should be one-click, hotkey, pie menu, popup, sidebar, Dope Sheet operation, etc.?
+
+9. Moving away from the character's intended viewing plane
+
+The previous proposal assumes a mostly camera-facing character plane.
+
+What happens if:
+
+- the 3D camera moves laterally?
+- camera perspective changes significantly?
+- the animator moves the character in 3D?
+- the character needs to interact with cockpit geometry at different depths?
+- a hoof needs to go behind the yoke while the body remains behind the seat edge?
+- a character intentionally rotates partly away from camera?
+
+Distinguish:
+
+- screen-space draw order
+- character-local pseudo-depth
+- actual world-space depth
+- interaction/occlusion with 3D geometry
+
+Can individual semantic slots temporarily participate in real 3D depth without destroying the 2D compositing model?
+
+What should happen when the camera exceeds the angle for which the current drawings make sense? Should this simply be an artistic responsibility requiring a different construction/head-angle drawing?
+
+10. Stress-test against original source data
+
+Most importantly, reconsider the proposed replay/pixel-diff test with these requirements included.
+
+The source animation data may reveal:
+
+- masks
+- nested masks
+- split fills/outlines
+- nested timelines
+- independent symbol playback
+- affine skew
+- unusual draw-order relationships
+- child transforms
+- color transforms
+- composite drawings
+
+What additional information should we extract from the source files during the replay prototype so that we discover these requirements systematically?
+
+Please produce a focused technical addendum answering these questions and identify any changes they require to the original architecture
