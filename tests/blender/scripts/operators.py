@@ -34,7 +34,7 @@ def test_step_construction_moves_sockets():
 
     before = sockets()
     assert bpy.ops.nirik.step_construction(rig="Character", step=30) == {"FINISHED"}
-    assert arm["nirik_construction"]["Character"] == 30
+    assert arm.pose.bones["ROOT"]["nirik_construction"] == 30
     assert sockets() != before
 
 
@@ -133,6 +133,74 @@ def test_wheel_on_non_drawing_part_is_consumed():
     bpy.ops.nirik.select_part(bones="ROOT")
     assert bpy.ops.nirik.step_drawing.poll()
     assert bpy.ops.nirik.step_drawing(step=1) == {"CANCELLED"}
+
+
+def _fcurves(arm):
+    return [fc for layer in arm.animation_data.action.layers for strip in layer.strips
+            for bag in strip.channelbags for fc in bag.fcurves]
+
+
+def test_construction_keys_live_on_visible_bones_and_transforms_stay_smooth():
+    arm = state["arm"]
+    arm.animation_data_clear()
+    scene = bpy.context.scene
+    bpy.ops.object.mode_set(mode="POSE")
+    scene.tool_settings.use_keyframe_insert_auto = True
+    # The animator keys a head move (smooth) ...
+    head = arm.pose.bones["Character.=HEADCOMP="]
+    for frame, x in ((1, 0.0), (10, 0.1)):
+        scene.frame_set(frame)
+        head.location.x = x
+        head.keyframe_insert("location", frame=frame)
+    # ... then swaps constructions and drawings, which key Nirik channels.
+    scene.frame_set(5)
+    bpy.ops.nirik.step_construction(rig="Character", step=1)
+    bpy.ops.nirik.select_part(bones="Head.MOUTH")
+    bpy.ops.nirik.step_drawing(step=1)
+    paths = {fc.data_path: fc for fc in _fcurves(arm)}
+    assert 'pose.bones["ROOT"]["nirik_construction"]' in paths
+    assert 'pose.bones["Character.=HEADCOMP="]["nirik_construction"]' in paths
+    move = paths['pose.bones["Character.=HEADCOMP="].location']
+    assert all(kp.interpolation == "BEZIER" for kp in move.keyframe_points)
+    scene.tool_settings.use_keyframe_insert_auto = False
+
+
+def test_rebuild_follows_retimed_construction_keys():
+    arm = state["arm"]
+    char = __import__("nirik.ui", fromlist=["x"]).character_for(arm)
+    arm.animation_data_clear()
+    rig_build.apply_construction(arm, char, "Character", 0, frame=1)
+    rig_build.apply_construction(arm, char, "Character", 30, frame=10)
+    scene = bpy.context.scene
+
+    def sockets_at(frame):
+        scene.frame_set(frame)
+        return {pb.name: tuple(round(v, 5) for v in pb.location)
+                for pb in arm.pose.bones if pb.name.endswith(".SOCKET")}
+
+    before, after = sockets_at(1), sockets_at(10)
+    bone = next(n for n in before if before[n] != after[n])
+
+    def neck_at(frame):
+        return sockets_at(frame)[bone]
+
+    pose30 = neck_at(10)
+    # Retime: move the visible construction key from frame 10 to 20, then sync.
+    fc = next(f for f in _fcurves(arm) if f.data_path == 'pose.bones["ROOT"]["nirik_construction"]')
+    fc.keyframe_points[1].co.x = 20
+    assert neck_at(15) == pose30  # stale: hidden sockets still switch at 10
+    assert bpy.ops.nirik.rebuild() == {"FINISHED"}
+    assert neck_at(15) != pose30 and neck_at(20) == pose30
+
+
+def test_card_origins_share_one_line():
+    # EEVEE sorts transparent objects by origin; per-part origins break the
+    # layering as soon as the camera turns.
+    cards = [o for o in bpy.data.objects if o.type == "MESH" and o.name.startswith("twilight:")]
+    xs = {round(o.matrix_world.translation.x, 6) for o in cards}
+    zs = {round(o.matrix_world.translation.z, 6) for o in cards}
+    assert xs == {0.0} and zs == {0.0}
+    assert len({round(o.matrix_world.translation.y, 7) for o in cards}) == len(cards)
 
 
 def test_swapped_drawing_renders():

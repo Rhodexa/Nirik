@@ -43,16 +43,32 @@ Children follow their parent (the head carries eyes, mouth, mane). `Alt+G`,
 1. Turn on **auto-key** (record button in the Timeline).
 2. Go to a frame, then pose, swap drawings or change constructions.
    Everything you change is keyed on that frame.
-3. Drawing swaps and constructions are **held** until the next key, like an
-   exposure sheet. Moves and rotations interpolate smoothly by default; to
-   pose on twos, select keys in the Graph Editor and set *Key → Interpolation
-   Mode → Constant*.
+3. Drawing swaps and constructions **hold** until the next key, like an
+   exposure sheet. Your own moves and rotations interpolate smoothly; to pose
+   on twos, select keys in the Graph Editor and set *Key → Interpolation Mode
+   → Constant*.
 4. `Space` plays.
+
+### Finding your keys
+
+- The **Character**, **Head** and **Drawing** fields in the Nirik tab are the
+  real keyed values: yellow on a key, green between keys, like any Blender
+  property.
+- **Prev Key / Next Key** (or `Up` / `Down` arrow) jump between keys of the
+  selected part. Constructions are keyed on **Body** (whole character) and
+  **Head**; drawing swaps on the part itself (Mouth, Blink, ...).
+- In the **Dope Sheet**, select a part to see its keys. Move or delete
+  construction and drawing keys there like any others, then press
+  **Sync After Retiming** so the hidden parts of the rig follow.
 
 Typical order: block poses with constructions (body, head angle), set
 expressions with Mouth/Brow/Blink swaps, then refine with transforms.
 
 ## Rendering
+
+The character is a flat drawing with its layers kept in order from any camera
+angle; past roughly 30 degrees off-axis she visibly reads as a cut-out, which
+is where a different construction (head angle, turnaround pose) belongs.
 
 Add a camera in front of the character (front view, `Ctrl+Alt+Numpad 0` to
 align), then `F12`. Characters are unlit drawings; set *Color Management →

@@ -42,10 +42,6 @@ def autokey_frame(context) -> int | None:
     return context.scene.frame_current if ts.use_keyframe_insert_auto else None
 
 
-def current_construction(arm, rig: str) -> int:
-    return arm.get("nirik_construction", {}).get(rig, 0)
-
-
 class NIRIK_OT_load_character(bpy.types.Operator):
     """Build a puppet from a Nirik character library folder"""
     bl_idname = "nirik.load_character"
@@ -93,7 +89,7 @@ class NIRIK_OT_step_construction(bpy.types.Operator):
         arm = nirik_armature(context)
         char = character_for(arm)
         total = len(char.rigs[self.rig].constructions)
-        cid = (current_construction(arm, self.rig) + self.step) % total
+        cid = (rig_build.current_construction(arm, char, self.rig) + self.step) % total
         rig_build.apply_construction(arm, char, self.rig, cid, autokey_frame(context))
         redraw_viewports(context)
         return {"FINISHED"}
@@ -161,10 +157,7 @@ class NIRIK_OT_step_drawing(bpy.types.Operator):
         rig_build.set_drawing(arm, char, slot, drawing)
         frame = autokey_frame(context)
         if frame is not None:
-            pb = arm.pose.bones[slot]
-            pb.keyframe_insert('["nirik_drawing"]', frame=frame)
-            pb.keyframe_insert('["nirik_tile"]', frame=frame)
-            rig_build.make_constant(arm)
+            rig_build.key_drawing(arm, slot, frame)
         redraw_viewports(context)
         return {"FINISHED"}
 
@@ -195,14 +188,25 @@ class NIRIK_PT_main(bpy.types.Panel):
         box = layout.box()
         box.label(text=f"{char.name}", icon="ARMATURE_DATA")
         for rig in char.rigs.values():
-            cid = current_construction(arm, rig.name)
-            labels = ", ".join(rig.constructions[cid].labels) or "-"
+            control = arm.pose.bones[rig_build.construction_bone(char, rig.name)]
+            cid = control.get("nirik_construction", 0)
             row = box.row(align=True)
-            row.label(text=f"{rig.name}: {cid + 1}/{len(rig.constructions)}  {labels}")
             op = row.operator("nirik.step_construction", text="", icon="TRIA_LEFT")
             op.rig, op.step = rig.name, -1
+            # Shown as the real property so keyed frames are colored like any
+            # Blender value; change it with the arrows (typing skips the rig).
+            sub = row.row(align=True)
+            sub.enabled = False
+            sub.prop(control, '["nirik_construction"]', text=rig.name)
             op = row.operator("nirik.step_construction", text="", icon="TRIA_RIGHT")
             op.rig, op.step = rig.name, 1
+            labels = ", ".join(rig.constructions[cid].labels)
+            if labels:
+                box.label(text=f"   {labels}  ({len(rig.constructions)} poses)")
+        row = box.row(align=True)
+        row.operator("screen.keyframe_jump", text="Prev Key", icon="PREV_KEYFRAME").next = False
+        row.operator("screen.keyframe_jump", text="Next Key", icon="NEXT_KEYFRAME").next = True
+        box.operator("nirik.rebuild", icon="FILE_REFRESH")
 
         slot = active_slot(context, char)
         box = layout.box()
@@ -214,14 +218,36 @@ class NIRIK_PT_main(bpy.types.Panel):
         box.label(text=f"{part_label(arm, char, slot)}  ({slot})", icon="BONE_DATA")
         row = box.row(align=True)
         row.operator("nirik.step_drawing", text="", icon="TRIA_LEFT").step = -1
-        row.label(text=f"{drawing.symbol} #{did}" if drawing else "(empty)")
+        sub = row.row(align=True)
+        sub.enabled = False
+        sub.prop(arm.pose.bones[slot], '["nirik_drawing"]', text="Drawing")
         row.operator("nirik.step_drawing", text="", icon="TRIA_RIGHT").step = 1
+        box.label(text=drawing.symbol if drawing else "(empty)")
         if drawing and drawing.tags:
             box.label(text=" · ".join(drawing.tags), icon="BOOKMARKS")
         box.label(text=f"{len(char.slot_drawings(slot))} drawings, "
                        f"{len(rig_build.palette(arm, slot))} loaded", icon="IMAGE_DATA")
         box.label(text="Alt+Wheel: swap (same set)", icon="MOUSE_MMB_SCROLL")
         box.label(text="Ctrl+Alt+Wheel: swap (all)", icon="MOUSE_MMB_SCROLL")
+
+
+class NIRIK_OT_rebuild(bpy.types.Operator):
+    """Re-sync the rig's hidden channels with the visible construction and
+    drawing keys (after moving or deleting them in the Dope Sheet)"""
+    bl_idname = "nirik.rebuild"
+    bl_label = "Sync After Retiming"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return nirik_armature(context) is not None
+
+    def execute(self, context):
+        arm = nirik_armature(context)
+        rig_build.rebuild_compiled(arm, character_for(arm))
+        context.scene.frame_set(context.scene.frame_current)
+        redraw_viewports(context)
+        return {"FINISHED"}
 
 
 class NIRIK_PT_more(bpy.types.Panel):
@@ -258,7 +284,7 @@ class NIRIK_PT_more(bpy.types.Panel):
 
 
 classes = (NIRIK_OT_load_character, NIRIK_OT_step_construction, NIRIK_OT_select_part,
-           NIRIK_OT_step_drawing, NIRIK_PT_main, NIRIK_PT_more)
+           NIRIK_OT_step_drawing, NIRIK_OT_rebuild, NIRIK_PT_main, NIRIK_PT_more)
 _keymaps = []
 
 
