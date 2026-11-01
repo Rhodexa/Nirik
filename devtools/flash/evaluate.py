@@ -291,9 +291,9 @@ class Evaluator:
         idx = self.index(name)
         return idx.frame_count if idx else 0
 
-    def evaluate(self, frame: int, root: str = MAIN) -> list[Node]:
+    def evaluate(self, frame: int, root: str = MAIN, world: Mat = IDENTITY) -> list[Node]:
         out: list[Node] = []
-        self._walk(root, frame, IDENTITY, COLOR_IDENTITY, (), None, 0, out, {root})
+        self._walk(root, frame, world, COLOR_IDENTITY, (), None, 0, out, {root})
         return out
 
     # The walk appends to `out`; mask layers are walked into a separate list.

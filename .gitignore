@@ -10,3 +10,4 @@ __pycache__/
 *.7z
 .venv/
 dist/
+library/
