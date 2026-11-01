@@ -1,4 +1,126 @@
 import bpy
+from bpy.props import IntProperty, StringProperty
+
+from ..bridge import rig_build
+from ..core import library
+
+_characters: dict[str, library.Character] = {}  # disposable cache: library path -> Character
+
+
+def character_for(arm) -> library.Character | None:
+    path = arm.get("nirik_library") if arm else None
+    if not path:
+        return None
+    if path not in _characters:
+        _characters[path] = library.load(path)
+    return _characters[path]
+
+
+def nirik_armature(context):
+    ob = context.active_object
+    return ob if ob is not None and ob.type == "ARMATURE" and "nirik_library" in ob else None
+
+
+def active_slot(context, char) -> str | None:
+    pb = context.active_pose_bone
+    return pb.name if pb is not None and pb.name in char.all_slots() and "nirik_drawing" in pb else None
+
+
+def autokey_frame(context) -> int | None:
+    ts = context.scene.tool_settings
+    return context.scene.frame_current if ts.use_keyframe_insert_auto else None
+
+
+def current_construction(arm, rig: str) -> int:
+    return arm.get("nirik_construction", {}).get(rig, 0)
+
+
+class NIRIK_OT_load_character(bpy.types.Operator):
+    """Build a puppet from a Nirik character library folder"""
+    bl_idname = "nirik.load_character"
+    bl_label = "Load Character"
+    bl_options = {"REGISTER", "UNDO"}
+
+    directory: StringProperty(subtype="DIR_PATH")
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
+
+    def execute(self, context):
+        try:
+            char = library.load(self.directory)
+        except (OSError, ValueError) as e:
+            self.report({"ERROR"}, f"Not a Nirik library: {e}")
+            return {"CANCELLED"}
+        _characters[str(char.root)] = char
+        if context.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
+        arm = rig_build.build(char)
+        arm["nirik_construction"] = {}
+        rig_build.apply_construction(arm, char, char.root_rig, 0)
+        arm["nirik_construction"][char.root_rig] = 0
+        for ob in context.selected_objects:
+            ob.select_set(False)
+        arm.select_set(True)
+        context.view_layer.objects.active = arm
+        return {"FINISHED"}
+
+
+class NIRIK_OT_step_construction(bpy.types.Operator):
+    """Switch to the previous/next construction of a rig"""
+    bl_idname = "nirik.step_construction"
+    bl_label = "Step Construction"
+    bl_options = {"REGISTER", "UNDO"}
+
+    rig: StringProperty()
+    step: IntProperty(default=1)
+
+    @classmethod
+    def poll(cls, context):
+        return nirik_armature(context) is not None
+
+    def execute(self, context):
+        arm = nirik_armature(context)
+        char = character_for(arm)
+        total = len(char.rigs[self.rig].constructions)
+        cid = (current_construction(arm, self.rig) + self.step) % total
+        rig_build.apply_construction(arm, char, self.rig, cid, autokey_frame(context))
+        if "nirik_construction" not in arm:
+            arm["nirik_construction"] = {}
+        arm["nirik_construction"][self.rig] = cid
+        return {"FINISHED"}
+
+
+class NIRIK_OT_step_drawing(bpy.types.Operator):
+    """Swap the selected part to the previous/next drawing of its slot"""
+    bl_idname = "nirik.step_drawing"
+    bl_label = "Step Drawing"
+    bl_options = {"REGISTER", "UNDO"}
+
+    step: IntProperty(default=1)
+
+    @classmethod
+    def poll(cls, context):
+        arm = nirik_armature(context)
+        return arm is not None and active_slot(context, character_for(arm)) is not None
+
+    def execute(self, context):
+        arm = nirik_armature(context)
+        char = character_for(arm)
+        slot = active_slot(context, char)
+        options = [0] + char.slot_drawings(slot)
+        current = arm.pose.bones[slot]["nirik_drawing"]
+        index = options.index(current) if current in options else 0
+        drawing = options[(index + self.step) % len(options)]
+        rig_build.set_drawing(arm, char, slot, drawing)
+        frame = autokey_frame(context)
+        if frame is not None:
+            pb = arm.pose.bones[slot]
+            pb.keyframe_insert('["nirik_drawing"]', frame=frame)
+            pb.keyframe_insert('["nirik_tile"]', frame=frame)
+            rig_build.make_constant(arm)
+        return {"FINISHED"}
 
 
 class NIRIK_PT_main(bpy.types.Panel):
@@ -8,9 +130,64 @@ class NIRIK_PT_main(bpy.types.Panel):
     bl_category = "Nirik"
 
     def draw(self, context):
-        self.layout.label(text="Nirik is loaded")
+        layout = self.layout
+        layout.operator("nirik.load_character", icon="FILE_FOLDER")
+        arm = nirik_armature(context)
+        char = character_for(arm)
+        if char is None:
+            layout.label(text="Select a Nirik character")
+            return
+
+        box = layout.box()
+        box.label(text=f"{char.name}", icon="ARMATURE_DATA")
+        for rig in char.rigs.values():
+            cid = current_construction(arm, rig.name)
+            labels = ", ".join(rig.constructions[cid].labels) or "-"
+            row = box.row(align=True)
+            row.label(text=f"{rig.name}: {cid + 1}/{len(rig.constructions)}  {labels}")
+            op = row.operator("nirik.step_construction", text="", icon="TRIA_LEFT")
+            op.rig, op.step = rig.name, -1
+            op = row.operator("nirik.step_construction", text="", icon="TRIA_RIGHT")
+            op.rig, op.step = rig.name, 1
+
+        slot = active_slot(context, char)
+        box = layout.box()
+        if slot is None:
+            box.label(text="Pose mode: select a part's bone", icon="BONE_DATA")
+            return
+        did = arm.pose.bones[slot]["nirik_drawing"]
+        drawing = char.drawings.get(did)
+        box.label(text=slot, icon="BONE_DATA")
+        row = box.row(align=True)
+        row.operator("nirik.step_drawing", text="", icon="TRIA_LEFT").step = -1
+        row.label(text=f"{drawing.symbol} #{did}" if drawing else "(empty)")
+        row.operator("nirik.step_drawing", text="", icon="TRIA_RIGHT").step = 1
+        if drawing and drawing.tags:
+            box.label(text=" · ".join(drawing.tags), icon="BOOKMARKS")
+        box.label(text=f"{len(char.slot_drawings(slot))} drawings, "
+                       f"{len(rig_build.palette(arm, slot))} loaded", icon="IMAGE_DATA")
+        box.label(text="Alt+Wheel swaps drawings", icon="MOUSE_MMB_SCROLL")
 
 
-classes = (NIRIK_PT_main,)
+classes = (NIRIK_OT_load_character, NIRIK_OT_step_construction, NIRIK_OT_step_drawing, NIRIK_PT_main)
+_keymaps = []
 
-register, unregister = bpy.utils.register_classes_factory(classes)
+
+def register():
+    for cls in classes:
+        bpy.utils.register_class(cls)
+    kc = bpy.context.window_manager.keyconfigs.addon
+    if kc:
+        km = kc.keymaps.new(name="Pose", space_type="EMPTY")
+        for key, step in (("WHEELUPMOUSE", -1), ("WHEELDOWNMOUSE", 1)):
+            kmi = km.keymap_items.new("nirik.step_drawing", key, "PRESS", alt=True)
+            kmi.properties.step = step
+            _keymaps.append((km, kmi))
+
+
+def unregister():
+    for km, kmi in _keymaps:
+        km.keymap_items.remove(kmi)
+    _keymaps.clear()
+    for cls in reversed(classes):
+        bpy.utils.unregister_class(cls)

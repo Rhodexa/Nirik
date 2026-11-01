@@ -2,7 +2,7 @@ PY      := .venv/bin/python
 # Recursive (=) so Blender is only queried by targets that need it.
 EXT_DIR  = $(shell $(PY) -m devtools.blender_env --extensions-dir)
 
-.PHONY: test test-core test-blender goldens blender link unlink validate build census
+.PHONY: test test-core test-blender goldens blender link unlink validate build census demo
 
 test:                 ## everything
 	$(PY) -m pytest -s
@@ -38,3 +38,7 @@ build:                ## installable zip in dist/
 SCENES ?= ../FLA-RE/fla/S08E23
 census:               ## feature census over FLA scenes (SCENES=dir)
 	$(PY) -m devtools.flash.census $(SCENES) --out out/census/$(notdir $(SCENES)) --jobs 6
+
+CHAR ?= library/twilight
+demo:                 ## open Blender with a character loaded (CHAR=library/<name>)
+	$(PY) -m devtools.blender_env --python devtools/blender_demo.py -- $(abspath $(CHAR))
