@@ -26,11 +26,15 @@ import hashlib
 import json
 import math
 import sys
+import io
 import time
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import numpy as np
+from PIL import Image
 
 from . import evaluate as E
 from . import fla, render
@@ -241,13 +245,37 @@ def _init_worker(path: str):
     _worker["ev"] = E.Evaluator(doc)
 
 
+def bleed_alpha(png: bytes, steps: int = 8) -> Image.Image:
+    """Spread edge colors into transparent pixels (alpha unchanged).
+
+    GPUs filter straight-alpha textures without premultiplying; transparent
+    pixels stored as black then darken every edge into a visible fringe.
+    """
+    img = np.asarray(Image.open(io.BytesIO(png)).convert("RGBA")).astype(np.float32)
+    rgb, known = img[..., :3].copy(), img[..., 3] > 0
+    for _ in range(steps):
+        acc = np.zeros_like(rgb)
+        cnt = np.zeros(known.shape, np.float32)
+        for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            shifted_known = np.roll(known, (dy, dx), axis=(0, 1))
+            acc += np.roll(rgb, (dy, dx), axis=(0, 1)) * shifted_known[..., None]
+            cnt += shifted_known
+        grow = ~known & (cnt > 0)
+        rgb[grow] = acc[grow] / cnt[grow][:, None]
+        known |= grow
+    if known.any():
+        rgb[~known] = rgb[known].mean(axis=0)
+    img[..., :3] = rgb
+    return Image.fromarray(np.clip(img + 0.5, 0, 255).astype(np.uint8), "RGBA")
+
+
 def _render_job(job):
     symbol, frame, canvas, ppu, out = job
     x0, y0, x1, y1 = canvas
     w, h = max(1, math.ceil((x1 - x0) * ppu)), max(1, math.ceil((y1 - y0) * ppu))
     world = (ppu, 0.0, 0.0, ppu, -x0 * ppu, -y0 * ppu)
     nodes = _worker["ev"].evaluate(frame, root=symbol, world=world)
-    render.rasterize(render.frame_svg(nodes, w, h), Path(out))
+    bleed_alpha(render.rasterize(render.frame_svg(nodes, w, h))).save(out, optimize=False)
     return out
 
 

@@ -19,11 +19,9 @@ STOCK = fla.FLARE_DIR / "fla" / "STK_C23_Princess_Twilight_Sparkle.fla"
 pytestmark = pytest.mark.skipif(not STOCK.exists(), reason=f"{STOCK} missing")
 
 
-@pytest.fixture(scope="module")
-def library(tmp_path_factory):
-    out = tmp_path_factory.mktemp("twilight")
-    import_character(STOCK, "~PTS_Character", "twilight", out, ppu=2.0, jobs=6)
-    return out
+@pytest.fixture
+def library(twilight_library):
+    return twilight_library
 
 
 def pixels(svg):

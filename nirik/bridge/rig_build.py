@@ -1,0 +1,409 @@
+"""Build a Blender puppet from a character library, and pose it.
+
+Per slot the armature gets a bone chain (all bones rest at the origin, so a
+pose is exactly the slot's 2D transform in the plane's local XY):
+
+  <slot>.SOCKET   compiler: location, rotation, non-uniform scale of the socket
+  <slot>.SKEW     compiler: second rotation; with SOCKET's scale this yields shear
+  <slot>          animator: the control (CTRL) bone
+
+Drawable slots get a card: a fixed quad covering the slot's canvas, parented
+to the CTRL bone, offset toward the camera by draw order. Its material samples
+the slot's tiled image (the palette: only drawings in use, one UDIM tile each).
+
+Bone properties are the animation interface; cards follow through drivers:
+  CTRL["nirik_drawing"]   drawing ID (stable, authoring)
+  CTRL["nirik_tile"]      palette index, -1 = empty (compiled)
+  SOCKET["nirik_color"]   color transform: mult RGBA + offset RGBA (0..255)
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+import bpy
+from bpy_extras import anim_utils
+
+from ..core import library as L
+
+UNITS_PER_METER = 300.0   # library units (Flash px) per meter: ponies ~1.1 m tall
+ORDER_STEP = 0.0005       # meters toward the camera per draw-order step
+BONE_LENGTH = 0.05
+IDENTITY_COLOR = (1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0)
+UDIM_COLUMNS = 10
+
+
+def safe(name: str) -> str:
+    return "".join(c if c.isalnum() or c in "._-" else "_" for c in name)
+
+
+# ── palettes (tiled images) ──────────────────────────────────────────────────
+
+def palette_dir(char: L.Character, slot: str) -> Path:
+    return char.root / ".udim" / safe(slot)
+
+
+def palette(arm: bpy.types.Object, slot: str) -> list[int]:
+    return list(arm["nirik_palettes"].get(slot, []))
+
+
+def ensure_in_palette(arm: bpy.types.Object, char: L.Character, slot: str, drawing: int) -> int:
+    """Palette index of `drawing` in `slot`, adding a UDIM tile if needed."""
+    pal = palette(arm, slot)
+    if drawing in pal:
+        return pal.index(drawing)
+    index = len(pal)
+    tile = 1001 + index
+    folder = palette_dir(char, slot)
+    folder.mkdir(parents=True, exist_ok=True)
+    link = folder / f"t.{tile}.png"
+    if link.is_symlink() or link.exists():
+        link.unlink()
+    os.symlink(char.drawing_path(drawing), link)
+    pal.append(drawing)
+    palettes = arm["nirik_palettes"]
+    palettes[slot] = pal
+
+    image = bpy.data.images.get(f"nirik:{char.name}:{slot}")
+    if image is not None:
+        if not image.tiles.get(tile):
+            image.tiles.new(tile_number=tile)
+        image.reload()
+    return index
+
+
+def palette_image(char: L.Character, slot: str) -> bpy.types.Image:
+    name = f"nirik:{char.name}:{slot}"
+    image = bpy.data.images.get(name)
+    if image is None:
+        folder = palette_dir(char, slot)
+        image = bpy.data.images.load(str(folder / "t.1001.png"), check_existing=False)
+        image.name = name
+        image.source = "TILED"
+        image.filepath = str(folder / "t.<UDIM>.png")
+        image.alpha_mode = "STRAIGHT"
+        # Raw sRGB values: color transforms apply in sRGB like Flash's, then
+        # the shader converts to linear (see srgb_to_linear_group).
+        image.colorspace_settings.name = "Non-Color"
+        image.reload()
+    return image
+
+
+# ── materials ────────────────────────────────────────────────────────────────
+
+def srgb_to_linear_group() -> bpy.types.ShaderNodeTree:
+    """Node group: exact sRGB transfer curve, per channel."""
+    name = "nirik: sRGB to linear"
+    group = bpy.data.node_groups.get(name)
+    if group is not None:
+        return group
+    group = bpy.data.node_groups.new(name, "ShaderNodeTree")
+    group.interface.new_socket("Color", in_out="INPUT", socket_type="NodeSocketVector")
+    group.interface.new_socket("Color", in_out="OUTPUT", socket_type="NodeSocketVector")
+    nodes, links = group.nodes, group.links
+    gin, gout = nodes.new("NodeGroupInput"), nodes.new("NodeGroupOutput")
+    split, join = nodes.new("ShaderNodeSeparateXYZ"), nodes.new("ShaderNodeCombineXYZ")
+    links.new(gin.outputs[0], split.inputs[0])
+    for i in range(3):
+        c = split.outputs[i]
+        lo = _math(nodes, links, "DIVIDE", c, value=12.92)
+        hi = _math(nodes, links, "POWER",
+                   _math(nodes, links, "DIVIDE", _math(nodes, links, "ADD", c, value=0.055), value=1.055),
+                   value=2.4)
+        above = _math(nodes, links, "GREATER_THAN", c, value=0.04045)
+        mixed = _math(nodes, links, "ADD", lo,
+                      _math(nodes, links, "MULTIPLY", above, _math(nodes, links, "SUBTRACT", hi, lo)))
+        links.new(mixed, join.inputs[i])
+    links.new(join.outputs[0], gout.inputs[0])
+    return group
+
+
+def _tile_uv(nodes, links, uv_socket, tile_socket):
+    """uv + (tile % 10, floor(tile / 10))"""
+    mod = nodes.new("ShaderNodeMath")
+    mod.operation = "MODULO"
+    mod.inputs[1].default_value = UDIM_COLUMNS
+    links.new(tile_socket, mod.inputs[0])
+    div = nodes.new("ShaderNodeMath")
+    div.operation = "DIVIDE"
+    div.inputs[1].default_value = UDIM_COLUMNS
+    links.new(tile_socket, div.inputs[0])
+    floor = nodes.new("ShaderNodeMath")
+    floor.operation = "FLOOR"
+    links.new(div.outputs[0], floor.inputs[0])
+    offset = nodes.new("ShaderNodeCombineXYZ")
+    links.new(mod.outputs[0], offset.inputs[0])
+    links.new(floor.outputs[0], offset.inputs[1])
+    add = nodes.new("ShaderNodeVectorMath")
+    add.operation = "ADD"
+    links.new(uv_socket, add.inputs[0])
+    links.new(offset.outputs[0], add.inputs[1])
+    return add.outputs[0]
+
+
+def _attr(nodes, name):
+    n = nodes.new("ShaderNodeAttribute")
+    n.attribute_type = "OBJECT"
+    n.attribute_name = name
+    return n
+
+
+def _math(nodes, links, op, a, b=None, value=None):
+    n = nodes.new("ShaderNodeMath")
+    n.operation = op
+    links.new(a, n.inputs[0])
+    if b is not None:
+        links.new(b, n.inputs[1])
+    elif value is not None:
+        n.inputs[1].default_value = value
+    return n.outputs[0]
+
+
+def build_material(char: L.Character, slot: L.Slot, image, mask_image=None, mask_empty=None):
+    mat = bpy.data.materials.new(f"nirik:{char.name}:{slot.name}")
+    mat.surface_render_method = "BLENDED"
+    mat.use_transparency_overlap = True
+    nodes, links = mat.node_tree.nodes, mat.node_tree.links
+    nodes.clear()
+
+    uv = nodes.new("ShaderNodeUVMap")
+    tile = _attr(nodes, "nirik_tile")
+    tex = nodes.new("ShaderNodeTexImage")
+    tex.image = image
+    tex.extension = "CLIP"
+    tex.interpolation = "Linear"
+    links.new(_tile_uv(nodes, links, uv.outputs["UV"], tile.outputs["Fac"]), tex.inputs["Vector"])
+
+    # Color transform: rgb * mult + off / 255, alpha * mult_a + off_a / 255.
+    mult, off = _attr(nodes, "nirik_mult"), _attr(nodes, "nirik_off")
+    scaled = nodes.new("ShaderNodeVectorMath")
+    scaled.operation = "MULTIPLY"
+    links.new(tex.outputs["Color"], scaled.inputs[0])
+    links.new(mult.outputs["Vector"], scaled.inputs[1])
+    off255 = nodes.new("ShaderNodeVectorMath")
+    off255.operation = "SCALE"
+    links.new(off.outputs["Vector"], off255.inputs[0])
+    off255.inputs["Scale"].default_value = 1 / 255
+    rgb = nodes.new("ShaderNodeVectorMath")
+    rgb.operation = "ADD"
+    links.new(scaled.outputs[0], rgb.inputs[0])
+    links.new(off255.outputs[0], rgb.inputs[1])
+
+    alpha = _math(nodes, links, "MULTIPLY", tex.outputs["Alpha"], mult.outputs["Alpha"])
+    alpha = _math(nodes, links, "ADD", alpha, _math(nodes, links, "DIVIDE", off.outputs["Alpha"], value=255))
+    visible = _math(nodes, links, "GREATER_THAN", tile.outputs["Fac"], value=-0.5)
+    alpha = _math(nodes, links, "MULTIPLY", alpha, visible)
+
+    if mask_image is not None:
+        coords = nodes.new("ShaderNodeTexCoord")
+        coords.object = mask_empty
+        mask_tile = _attr(nodes, "nirik_mask_tile")
+        mtex = nodes.new("ShaderNodeTexImage")
+        mtex.image = mask_image
+        mtex.extension = "CLIP"
+        links.new(_tile_uv(nodes, links, coords.outputs["Object"], mask_tile.outputs["Fac"]),
+                  mtex.inputs["Vector"])
+        mask_visible = _math(nodes, links, "GREATER_THAN", mask_tile.outputs["Fac"], value=-0.5)
+        alpha = _math(nodes, links, "MULTIPLY", alpha, _math(nodes, links, "MULTIPLY",
+                                                             mtex.outputs["Alpha"], mask_visible))
+    alpha = _math(nodes, links, "MINIMUM", _math(nodes, links, "MAXIMUM", alpha, value=0.0), value=1.0)
+    # Texture filtering leaves near-zero alpha around card edges; drop it.
+    alpha = _math(nodes, links, "MULTIPLY", alpha, _math(nodes, links, "GREATER_THAN", alpha, value=1 / 255))
+
+    emit = nodes.new("ShaderNodeEmission")
+    clamp = nodes.new("ShaderNodeVectorMath")
+    clamp.operation = "MINIMUM"
+    links.new(rgb.outputs[0], clamp.inputs[0])
+    clamp.inputs[1].default_value = (1, 1, 1)
+    to_linear = nodes.new("ShaderNodeGroup")
+    to_linear.node_tree = srgb_to_linear_group()
+    links.new(clamp.outputs[0], to_linear.inputs[0])
+    links.new(to_linear.outputs[0], emit.inputs["Color"])
+    clear = nodes.new("ShaderNodeBsdfTransparent")
+    mix = nodes.new("ShaderNodeMixShader")
+    links.new(alpha, mix.inputs["Fac"])
+    links.new(clear.outputs[0], mix.inputs[1])
+    links.new(emit.outputs[0], mix.inputs[2])
+    out = nodes.new("ShaderNodeOutputMaterial")
+    links.new(mix.outputs[0], out.inputs["Surface"])
+    return mat
+
+
+# ── drivers ──────────────────────────────────────────────────────────────────
+
+def _drive(obj, prop: str, index: int, arm, bone: str, bone_prop: str, bone_index: int | None = None):
+    fc = obj.driver_add(f'["{prop}"]', index) if index >= 0 else obj.driver_add(f'["{prop}"]')
+    drv = fc.driver
+    drv.type = "SCRIPTED"
+    var = drv.variables.new()
+    var.name = "v"
+    var.targets[0].id = arm
+    suffix = f"[{bone_index}]" if bone_index is not None else ""
+    var.targets[0].data_path = f'pose.bones["{bone}"]["{bone_prop}"]{suffix}'
+    drv.expression = "v"  # simple expression: no Python needed at render time
+
+
+# ── build ────────────────────────────────────────────────────────────────────
+
+def build(char: L.Character, collection=None, units_per_meter: float = UNITS_PER_METER) -> bpy.types.Object:
+    scene = bpy.context.scene
+    coll = collection
+    if coll is None:
+        coll = bpy.data.collections.new(f"nirik:{char.name}")
+        scene.collection.children.link(coll)
+
+    arm_data = bpy.data.armatures.new(char.name)
+    arm = bpy.data.objects.new(char.name, arm_data)
+    coll.objects.link(arm)
+    arm["nirik_library"] = str(char.root)
+    arm["nirik_units_per_meter"] = units_per_meter
+    arm["nirik_palettes"] = {}
+
+    slots = char.all_slots()
+    holder = {s.child_rig: s.name for s in slots.values() if s.child_rig}  # rig -> holding slot
+
+    # Bones: all rest at the origin pointing +Z (local X = world X, local Y = up).
+    view_layer = bpy.context.view_layer
+    view_layer.objects.active = arm
+    bpy.ops.object.mode_set(mode="EDIT")
+    internal = arm_data.collections.new("Nirik Internal")
+    controls = arm_data.collections.new("Controls")
+    root = arm_data.edit_bones.new("ROOT")
+    root.head, root.tail = (0, 0, 0), (0, 0, BONE_LENGTH * 3)
+    controls.assign(root)
+    for rig in char.rigs.values():
+        for s in rig.slots:
+            parent_name = holder.get(rig.name, "ROOT")
+            sock = arm_data.edit_bones.new(f"{s.name}.SOCKET")
+            skew = arm_data.edit_bones.new(f"{s.name}.SKEW")
+            ctrl = arm_data.edit_bones.new(s.name)
+            for b in (sock, skew, ctrl):
+                b.head, b.tail, b.roll = (0, 0, 0), (0, 0, BONE_LENGTH), 0
+            internal.assign(sock)
+            internal.assign(skew)
+            controls.assign(ctrl)
+            sock.parent = arm_data.edit_bones[parent_name] if parent_name != "ROOT" else root
+            skew.parent, ctrl.parent = sock, skew
+    bpy.ops.object.mode_set(mode="OBJECT")
+    internal.is_visible = False
+
+    for pb in arm.pose.bones:
+        pb.rotation_mode = "XYZ"
+        if pb.name in slots:
+            pb["nirik_drawing"] = 0
+            pb["nirik_tile"] = -1
+        elif pb.name.endswith(".SOCKET"):
+            pb["nirik_color"] = list(IDENTITY_COLOR)
+
+    # Mask empties: object coordinates == mask canvas UVs.
+    mask_empties = {}
+    for s in slots.values():
+        if s.mask and s.canvas:
+            empty = bpy.data.objects.new(f"nirik:{char.name}:{s.name}", None)
+            coll.objects.link(empty)
+            _parent_to_bone(empty, arm, s.name)
+            x0, y0, x1, y1 = s.canvas
+            empty.location = (x0 / units_per_meter, -y1 / units_per_meter - BONE_LENGTH, 0)
+            empty.scale = ((x1 - x0) / units_per_meter, (y1 - y0) / units_per_meter, 1)
+            empty.hide_select = True
+            mask_empties[s.name] = empty
+
+    # Cards, back to front.
+    for order, name in enumerate(char.draw_order()):
+        s = slots[name]
+        x0, y0, x1, y1 = s.canvas
+        mesh = bpy.data.meshes.new(f"nirik:{char.name}:{name}")
+        px0, px1 = x0 / units_per_meter, x1 / units_per_meter
+        py0, py1 = -y1 / units_per_meter, -y0 / units_per_meter  # y up: bottom, top
+        mesh.from_pydata([(px0, py0, 0), (px1, py0, 0), (px1, py1, 0), (px0, py1, 0)], [], [(0, 1, 2, 3)])
+        uv = mesh.uv_layers.new(name="UVMap")
+        for loop, co in zip(uv.data, ((0, 0), (1, 0), (1, 1), (0, 1))):
+            loop.uv = co
+        card = bpy.data.objects.new(f"{char.name}:{name}", mesh)
+        coll.objects.link(card)
+        _parent_to_bone(card, arm, name)
+        card.location = (0, -BONE_LENGTH, order * ORDER_STEP)
+        card.hide_select = True
+        card["nirik_tile"] = -1
+        card["nirik_mult"] = [1.0, 1.0, 1.0, 1.0]
+        card["nirik_off"] = [0.0, 0.0, 0.0, 0.0]
+        _drive(card, "nirik_tile", -1, arm, name, "nirik_tile")
+        for i in range(4):
+            _drive(card, "nirik_mult", i, arm, f"{name}.SOCKET", "nirik_color", i)
+            _drive(card, "nirik_off", i, arm, f"{name}.SOCKET", "nirik_color", 4 + i)
+
+        mask_image = mask_empty = None
+        if s.masked_by:
+            card["nirik_mask_tile"] = -1
+            _drive(card, "nirik_mask_tile", -1, arm, s.masked_by, "nirik_tile")
+            mask_image = _palette_image_seeded(arm, char, s.masked_by)
+            mask_empty = mask_empties[s.masked_by]
+        image = _palette_image_seeded(arm, char, name)
+        mesh.materials.append(build_material(char, s, image, mask_image, mask_empty))
+    return arm
+
+
+def _palette_image_seeded(arm, char, slot: str):
+    """Palette image for `slot`; seeds tile 1001 with the slot's first drawing."""
+    if not palette(arm, slot):
+        drawings = char.slot_drawings(slot)
+        if drawings:
+            ensure_in_palette(arm, char, slot, drawings[0])
+    return palette_image(char, slot)
+
+
+def _parent_to_bone(obj, arm, bone: str):
+    obj.parent = arm
+    obj.parent_type = "BONE"
+    obj.parent_bone = bone
+
+
+# ── posing ───────────────────────────────────────────────────────────────────
+
+def set_drawing(arm, char: L.Character, slot: str, drawing: int):
+    pb = arm.pose.bones[slot]
+    pb["nirik_drawing"] = drawing
+    pb["nirik_tile"] = ensure_in_palette(arm, char, slot, drawing) if drawing else -1
+
+
+def apply_construction(arm, char: L.Character, rig: str, construction: int, frame: int | None = None):
+    """Pose sockets and drawings from a library construction; key them if `frame` is given."""
+    upm = arm["nirik_units_per_meter"]
+    cons = char.rigs[rig].constructions[construction]
+    for s in char.rigs[rig].slots:
+        entry = cons.slots.get(s.name)
+        sock, skew, ctrl = (arm.pose.bones[f"{s.name}.SOCKET"], arm.pose.bones[f"{s.name}.SKEW"],
+                            arm.pose.bones[s.name])
+        if entry is not None:
+            pair = L.socket_bones(L.to_plane(entry.matrix, upm))
+            sock.location = (pair.location[0], pair.location[1], 0)
+            sock.rotation_euler = (0, 0, pair.rot_a)
+            sock.scale = (pair.scale[0], pair.scale[1], 1)
+            skew.rotation_euler = (0, 0, pair.rot_b)
+            sock["nirik_color"] = list(entry.color or IDENTITY_COLOR)
+        if s.child_rig:
+            if entry is not None and entry.construction is not None:
+                apply_construction(arm, char, s.child_rig, entry.construction, frame)
+        else:
+            set_drawing(arm, char, s.name, entry.drawing if entry else 0)
+        if frame is not None:
+            for path in ("location", "rotation_euler", "scale", '["nirik_color"]'):
+                sock.keyframe_insert(path, frame=frame)
+            skew.keyframe_insert("rotation_euler", frame=frame)
+            if not s.child_rig:
+                ctrl.keyframe_insert('["nirik_drawing"]', frame=frame)
+                ctrl.keyframe_insert('["nirik_tile"]', frame=frame)
+    if frame is not None:
+        make_constant(arm)
+
+
+def make_constant(obj):
+    """Stepped keys everywhere: exposures hold until the next key."""
+    adt = obj.animation_data
+    if not adt or not adt.action:
+        return
+    bag = anim_utils.action_get_channelbag_for_slot(adt.action, adt.action_slot)
+    for fc in bag.fcurves:
+        for kp in fc.keyframe_points:
+            kp.interpolation = "CONSTANT"
