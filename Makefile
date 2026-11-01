@@ -2,7 +2,7 @@ PY      := .venv/bin/python
 # Recursive (=) so Blender is only queried by targets that need it.
 EXT_DIR  = $(shell $(PY) -m devtools.blender_env --extensions-dir)
 
-.PHONY: test test-core test-blender goldens blender link unlink validate build
+.PHONY: test test-core test-blender goldens blender link unlink validate build census
 
 test:                 ## everything
 	$(PY) -m pytest -s
@@ -34,3 +34,7 @@ validate:
 build:                ## installable zip in dist/
 	mkdir -p dist
 	$(PY) -m devtools.blender_env --command extension build --source-dir nirik --output-dir dist
+
+SCENES ?= ../FLA-RE/fla/S08E23
+census:               ## feature census over FLA scenes (SCENES=dir)
+	$(PY) -m devtools.flash.census $(SCENES) --out out/census/$(notdir $(SCENES)) --jobs 6
