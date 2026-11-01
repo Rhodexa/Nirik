@@ -70,3 +70,12 @@ def test_socket_bones_roundtrip():
     a, b, c, d = compose(RotScaleRot(pair.rot_a, pair.scale[0], pair.scale[1], pair.rot_b))
     assert (a, b, c, d) == pytest.approx(m[:4])
     assert pair.location == (0.4, -0.2)
+
+
+def test_parts_group_eye_layers_per_mask(tmp_path):
+    from nirik.core import controls
+    ch = L.load(write_library(tmp_path))
+    parts = dict(controls.parts(ch))
+    assert parts["Body"] == ["ROOT"]
+    assert parts["Head"] == ["Character.HEAD"]
+    assert parts["Eye"] == ["Head.IRIS"]

@@ -1,8 +1,8 @@
 import bpy
-from bpy.props import IntProperty, StringProperty
+from bpy.props import EnumProperty, IntProperty, StringProperty
 
 from ..bridge import rig_build
-from ..core import library
+from ..core import controls, library
 
 _characters: dict[str, library.Character] = {}  # disposable cache: library path -> Character
 
@@ -92,13 +92,41 @@ class NIRIK_OT_step_construction(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class NIRIK_OT_select_part(bpy.types.Operator):
+    """Select this part's controls (Pose mode)"""
+    bl_idname = "nirik.select_part"
+    bl_label = "Select Part"
+    bl_options = {"REGISTER", "UNDO"}
+
+    bones: StringProperty(description="Comma-separated bone names")
+
+    @classmethod
+    def poll(cls, context):
+        return nirik_armature(context) is not None
+
+    def execute(self, context):
+        arm = nirik_armature(context)
+        if context.mode != "POSE":
+            bpy.ops.object.mode_set(mode="POSE")
+        names = [n for n in self.bones.split(",") if n in arm.data.bones]
+        for pb in arm.pose.bones:
+            pb.select = pb.name in names
+        if names:
+            arm.data.bones.active = arm.data.bones[names[0]]
+        return {"FINISHED"}
+
+
 class NIRIK_OT_step_drawing(bpy.types.Operator):
-    """Swap the selected part to the previous/next drawing of its slot"""
+    """Swap the selected part to the previous/next drawing"""
     bl_idname = "nirik.step_drawing"
     bl_label = "Step Drawing"
     bl_options = {"REGISTER", "UNDO"}
 
     step: IntProperty(default=1)
+    scope: EnumProperty(items=(
+        ("SYMBOL", "Same Set", "Only drawings from the current drawing's set (e.g. the 3/4 mouth chart)"),
+        ("SLOT", "All", "Every drawing this part can show"),
+    ), default="SYMBOL")
 
     @classmethod
     def poll(cls, context):
@@ -109,8 +137,11 @@ class NIRIK_OT_step_drawing(bpy.types.Operator):
         arm = nirik_armature(context)
         char = character_for(arm)
         slot = active_slot(context, char)
-        options = [0] + char.slot_drawings(slot)
         current = arm.pose.bones[slot]["nirik_drawing"]
+        options = [0] + char.slot_drawings(slot)
+        if self.scope == "SYMBOL" and current in char.drawings:
+            symbol = char.drawings[current].symbol
+            options = [d for d in options[1:] if char.drawings[d].symbol == symbol]
         index = options.index(current) if current in options else 0
         drawing = options[(index + self.step) % len(options)]
         rig_build.set_drawing(arm, char, slot, drawing)
@@ -137,6 +168,14 @@ class NIRIK_PT_main(bpy.types.Panel):
         if char is None:
             layout.label(text="Select a Nirik character")
             return
+
+        box = layout.box()
+        box.label(text="Parts", icon="RESTRICT_SELECT_OFF")
+        grid = box.grid_flow(columns=3, align=True)
+        selected = {pb.name for pb in arm.pose.bones if pb.select} if context.mode == "POSE" else set()
+        for label, bones in controls.parts(char):
+            op = grid.operator("nirik.select_part", text=label, depress=bool(selected) and selected == set(bones))
+            op.bones = ",".join(bones)
 
         box = layout.box()
         box.label(text=f"{char.name}", icon="ARMATURE_DATA")
@@ -166,10 +205,12 @@ class NIRIK_PT_main(bpy.types.Panel):
             box.label(text=" · ".join(drawing.tags), icon="BOOKMARKS")
         box.label(text=f"{len(char.slot_drawings(slot))} drawings, "
                        f"{len(rig_build.palette(arm, slot))} loaded", icon="IMAGE_DATA")
-        box.label(text="Alt+Wheel swaps drawings", icon="MOUSE_MMB_SCROLL")
+        box.label(text="Alt+Wheel: swap (same set)", icon="MOUSE_MMB_SCROLL")
+        box.label(text="Ctrl+Alt+Wheel: swap (all)", icon="MOUSE_MMB_SCROLL")
 
 
-classes = (NIRIK_OT_load_character, NIRIK_OT_step_construction, NIRIK_OT_step_drawing, NIRIK_PT_main)
+classes = (NIRIK_OT_load_character, NIRIK_OT_step_construction, NIRIK_OT_select_part,
+           NIRIK_OT_step_drawing, NIRIK_PT_main)
 _keymaps = []
 
 
@@ -180,9 +221,10 @@ def register():
     if kc:
         km = kc.keymaps.new(name="Pose", space_type="EMPTY")
         for key, step in (("WHEELUPMOUSE", -1), ("WHEELDOWNMOUSE", 1)):
-            kmi = km.keymap_items.new("nirik.step_drawing", key, "PRESS", alt=True)
-            kmi.properties.step = step
-            _keymaps.append((km, kmi))
+            for ctrl, scope in ((False, "SYMBOL"), (True, "SLOT")):
+                kmi = km.keymap_items.new("nirik.step_drawing", key, "PRESS", alt=True, ctrl=ctrl)
+                kmi.properties.step, kmi.properties.scope = step, scope
+                _keymaps.append((km, kmi))
 
 
 def unregister():

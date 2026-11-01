@@ -25,6 +25,7 @@ from pathlib import Path
 import bpy
 from bpy_extras import anim_utils
 
+from ..core import controls
 from ..core import library as L
 
 UNITS_PER_METER = 300.0   # library units (Flash px) per meter: ponies ~1.1 m tall
@@ -119,8 +120,22 @@ def srgb_to_linear_group() -> bpy.types.ShaderNodeTree:
     return group
 
 
-def _tile_uv(nodes, links, uv_socket, tile_socket):
-    """uv + (tile % 10, floor(tile / 10))"""
+def _tile_uv(nodes, links, uv_socket, tile_socket, size):
+    """clamp(uv, half texel) + (tile % 10, floor(tile / 10))
+
+    The half-texel inset keeps linear filtering from blending in texels
+    across the tile border, i.e. from the neighboring drawing.
+    """
+    hx, hy = 0.5 / size[0], 0.5 / size[1]
+    lo = nodes.new("ShaderNodeVectorMath")
+    lo.operation = "MAXIMUM"
+    links.new(uv_socket, lo.inputs[0])
+    lo.inputs[1].default_value = (hx, hy, 0)
+    hi = nodes.new("ShaderNodeVectorMath")
+    hi.operation = "MINIMUM"
+    links.new(lo.outputs[0], hi.inputs[0])
+    hi.inputs[1].default_value = (1 - hx, 1 - hy, 0)
+    uv_socket = hi.outputs[0]
     mod = nodes.new("ShaderNodeMath")
     mod.operation = "MODULO"
     mod.inputs[1].default_value = UDIM_COLUMNS
@@ -160,7 +175,13 @@ def _math(nodes, links, op, a, b=None, value=None):
     return n.outputs[0]
 
 
-def build_material(char: L.Character, slot: L.Slot, image, mask_image=None, mask_empty=None):
+def canvas_pixels(char: L.Character, slot: L.Slot) -> tuple[int, int]:
+    x0, y0, x1, y1 = slot.canvas
+    return max(1, round((x1 - x0) * char.ppu)), max(1, round((y1 - y0) * char.ppu))
+
+
+def build_material(char: L.Character, slot: L.Slot, image, mask_image=None, mask_empty=None,
+                   mask_slot: L.Slot | None = None):
     mat = bpy.data.materials.new(f"nirik:{char.name}:{slot.name}")
     mat.surface_render_method = "BLENDED"
     mat.use_transparency_overlap = True
@@ -173,7 +194,8 @@ def build_material(char: L.Character, slot: L.Slot, image, mask_image=None, mask
     tex.image = image
     tex.extension = "CLIP"
     tex.interpolation = "Linear"
-    links.new(_tile_uv(nodes, links, uv.outputs["UV"], tile.outputs["Fac"]), tex.inputs["Vector"])
+    links.new(_tile_uv(nodes, links, uv.outputs["UV"], tile.outputs["Fac"], canvas_pixels(char, slot)),
+              tex.inputs["Vector"])
 
     # Color transform: rgb * mult + off / 255, alpha * mult_a + off_a / 255.
     mult, off = _attr(nodes, "nirik_mult"), _attr(nodes, "nirik_off")
@@ -202,9 +224,18 @@ def build_material(char: L.Character, slot: L.Slot, image, mask_image=None, mask
         mtex = nodes.new("ShaderNodeTexImage")
         mtex.image = mask_image
         mtex.extension = "CLIP"
-        links.new(_tile_uv(nodes, links, coords.outputs["Object"], mask_tile.outputs["Fac"]),
-                  mtex.inputs["Vector"])
+        links.new(_tile_uv(nodes, links, coords.outputs["Object"], mask_tile.outputs["Fac"],
+                           canvas_pixels(char, mask_slot)), mtex.inputs["Vector"])
         mask_visible = _math(nodes, links, "GREATER_THAN", mask_tile.outputs["Fac"], value=-0.5)
+        # Outside the mask canvas the lookup would land on a neighboring tile
+        # (another drawing): treat it as fully masked instead.
+        split = nodes.new("ShaderNodeSeparateXYZ")
+        links.new(coords.outputs["Object"], split.inputs[0])
+        for axis in (0, 1):
+            c = split.outputs[axis]
+            inside = _math(nodes, links, "MULTIPLY", _math(nodes, links, "GREATER_THAN", c, value=0.0),
+                           _math(nodes, links, "LESS_THAN", c, value=1.0))
+            mask_visible = _math(nodes, links, "MULTIPLY", mask_visible, inside)
         alpha = _math(nodes, links, "MULTIPLY", alpha, _math(nodes, links, "MULTIPLY",
                                                              mtex.outputs["Alpha"], mask_visible))
     alpha = _math(nodes, links, "MINIMUM", _math(nodes, links, "MAXIMUM", alpha, value=0.0), value=1.0)
@@ -268,10 +299,12 @@ def build(char: L.Character, collection=None, units_per_meter: float = UNITS_PER
     view_layer.objects.active = arm
     bpy.ops.object.mode_set(mode="EDIT")
     internal = arm_data.collections.new("Nirik Internal")
-    controls = arm_data.collections.new("Controls")
+    main = arm_data.collections.new("Controls")
+    more = arm_data.collections.new("More Controls")
+    main_bones = controls.main_bones(char)
     root = arm_data.edit_bones.new("ROOT")
     root.head, root.tail = (0, 0, 0), (0, 0, BONE_LENGTH * 3)
-    controls.assign(root)
+    main.assign(root)
     for rig in char.rigs.values():
         for s in rig.slots:
             parent_name = holder.get(rig.name, "ROOT")
@@ -282,11 +315,12 @@ def build(char: L.Character, collection=None, units_per_meter: float = UNITS_PER
                 b.head, b.tail, b.roll = (0, 0, 0), (0, 0, BONE_LENGTH), 0
             internal.assign(sock)
             internal.assign(skew)
-            controls.assign(ctrl)
+            (main if s.name in main_bones else more).assign(ctrl)
             sock.parent = arm_data.edit_bones[parent_name] if parent_name != "ROOT" else root
             skew.parent, ctrl.parent = sock, skew
     bpy.ops.object.mode_set(mode="OBJECT")
     internal.is_visible = False
+    more.is_visible = False
 
     for pb in arm.pose.bones:
         pb.rotation_mode = "XYZ"
@@ -340,7 +374,8 @@ def build(char: L.Character, collection=None, units_per_meter: float = UNITS_PER
             mask_image = _palette_image_seeded(arm, char, s.masked_by)
             mask_empty = mask_empties[s.masked_by]
         image = _palette_image_seeded(arm, char, name)
-        mesh.materials.append(build_material(char, s, image, mask_image, mask_empty))
+        mesh.materials.append(build_material(char, s, image, mask_image, mask_empty,
+                                             slots.get(s.masked_by)))
     return arm
 
 
@@ -365,6 +400,9 @@ def set_drawing(arm, char: L.Character, slot: str, drawing: int):
     pb = arm.pose.bones[slot]
     pb["nirik_drawing"] = drawing
     pb["nirik_tile"] = ensure_in_palette(arm, char, slot, drawing) if drawing else -1
+    # Custom properties don't notify the depsgraph; without this the cards'
+    # drivers keep showing the old drawing until something else updates.
+    arm.update_tag()
 
 
 def apply_construction(arm, char: L.Character, rig: str, construction: int, frame: int | None = None):
@@ -396,6 +434,7 @@ def apply_construction(arm, char: L.Character, rig: str, construction: int, fram
                 ctrl.keyframe_insert('["nirik_tile"]', frame=frame)
     if frame is not None:
         make_constant(arm)
+    arm.update_tag()
 
 
 def make_constant(obj):
