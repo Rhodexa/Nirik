@@ -320,10 +320,11 @@ def build(char: L.Character, collection=None, units_per_meter: float = UNITS_PER
             skew.parent, ctrl.parent = sock, skew
     bpy.ops.object.mode_set(mode="OBJECT")
     internal.is_visible = False
-    more.is_visible = False
 
     for pb in arm.pose.bones:
         pb.rotation_mode = "XYZ"
+        # Extra controls stay hidden one by one; the panel reveals the one you pick.
+        pb.hide = pb.name in slots and pb.name not in main_bones
         if pb.name in slots:
             pb["nirik_drawing"] = 0
             pb["nirik_tile"] = -1

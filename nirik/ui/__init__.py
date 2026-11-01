@@ -104,8 +104,11 @@ class NIRIK_OT_select_part(bpy.types.Operator):
         if context.mode != "POSE":
             bpy.ops.object.mode_set(mode="POSE")
         names = [n for n in self.bones.split(",") if n in arm.data.bones]
+        main = controls.main_bones(character_for(arm))
         for pb in arm.pose.bones:
             pb.select = pb.name in names
+            if pb.name in character_for(arm).all_slots() and pb.name not in main:
+                pb.hide = pb.name not in names  # show only the extra part you picked
         if names:
             arm.data.bones.active = arm.data.bones[names[0]]
         return {"FINISHED"}
@@ -204,8 +207,37 @@ class NIRIK_PT_main(bpy.types.Panel):
         box.label(text="Ctrl+Alt+Wheel: swap (all)", icon="MOUSE_MMB_SCROLL")
 
 
+class NIRIK_PT_more(bpy.types.Panel):
+    bl_label = "More Parts"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "Nirik"
+    bl_parent_id = "NIRIK_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    @classmethod
+    def poll(cls, context):
+        return character_for(nirik_armature(context)) is not None
+
+    def draw(self, context):
+        arm = nirik_armature(context)
+        char = character_for(arm)
+        layout = self.layout
+        layout.label(text="Parts showing a drawing in this pose:")
+        for rig, names in controls.more_parts(char).items():
+            showing = [n for n in names if arm.pose.bones[n]["nirik_drawing"]]
+            if not showing:
+                continue
+            layout.label(text=rig)
+            grid = layout.grid_flow(columns=2, align=True)
+            for name in showing:
+                op = grid.operator("nirik.select_part", text=controls.label(name),
+                                   depress=arm.pose.bones[name].select)
+                op.bones = name
+
+
 classes = (NIRIK_OT_load_character, NIRIK_OT_step_construction, NIRIK_OT_select_part,
-           NIRIK_OT_step_drawing, NIRIK_PT_main)
+           NIRIK_OT_step_drawing, NIRIK_PT_main, NIRIK_PT_more)
 _keymaps = []
 
 

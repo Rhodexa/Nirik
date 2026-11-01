@@ -79,3 +79,11 @@ def test_parts_group_eye_layers_per_mask(tmp_path):
     assert parts["Body"] == ["ROOT"]
     assert parts["Head"] == ["Character.HEAD"]
     assert parts["Eye"] == ["Head.IRIS"]
+
+
+def test_part_labels():
+    from nirik.core.controls import label
+    assert label("Character.Hind leg_2") == "Hind Leg 2"
+    assert label("Head.EAR_3") == "Ear 3"
+    assert label("Character.=HEADCOMP=") == "Headcomp"
+    assert label("Character.Arm OL") == "Arm OL"

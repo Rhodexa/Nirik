@@ -114,6 +114,17 @@ def test_parts_panel_selects_bones():
     assert {pb.name for pb in arm.pose.bones if pb.select} == {"Head.IRIS", "Head.PUPIL"}
 
 
+def test_more_parts_reveal_one_hidden_bone_at_a_time():
+    arm = state["arm"]
+    bpy.ops.object.mode_set(mode="POSE")
+    tail, ear = arm.pose.bones["Character.Tail"], arm.pose.bones["Head.EAR"]
+    assert tail.hide and ear.hide
+    bpy.ops.nirik.select_part(bones="Character.Tail")
+    assert not tail.hide and tail.select
+    bpy.ops.nirik.select_part(bones="Head.EAR")
+    assert tail.hide and not ear.hide and ear.select
+
+
 def test_swapped_drawing_renders():
     # Two different mouths must render differently: the new tile is live.
     arm = state["arm"]

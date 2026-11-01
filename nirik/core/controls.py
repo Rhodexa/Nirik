@@ -36,3 +36,27 @@ def parts(char: Character) -> list[tuple[str, list[str]]]:
 
 def main_bones(char: Character) -> set[str]:
     return {b for _, bones in parts(char) for b in bones}
+
+
+def label(slot_name: str) -> str:
+    """'Character.Hind leg_2' -> 'Hind Leg 2', 'Head.EAR_3' -> 'Ear 3'."""
+    layer = slot_name.split(".", 1)[-1]
+    base, _, n = layer.rpartition("_")
+    if not (base and n.isdigit()):
+        base, n = layer, ""
+    words = base.replace("=", " ").split()
+    # Title-case, but keep short abbreviations ("OL" = outline) as they are.
+    text = " ".join(w.capitalize() if w.islower() or (w.isupper() and len(w) > 2) else w
+                    for w in words)
+    return f"{text} {n}".strip()
+
+
+def more_parts(char: Character) -> dict[str, list[str]]:
+    """Drawable slots outside the main parts, per rig: {rig: [slot names]}."""
+    main = main_bones(char)
+    out: dict[str, list[str]] = {}
+    for rig in char.rigs.values():
+        names = [s.name for s in rig.slots if s.canvas and not s.mask and s.name not in main]
+        if names:
+            out[rig.name] = names
+    return out
