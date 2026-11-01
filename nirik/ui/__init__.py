@@ -57,9 +57,7 @@ class NIRIK_OT_load_character(bpy.types.Operator):
         if context.mode != "OBJECT":
             bpy.ops.object.mode_set(mode="OBJECT")
         arm = rig_build.build(char)
-        arm["nirik_construction"] = {}
         rig_build.apply_construction(arm, char, char.root_rig, 0)
-        arm["nirik_construction"][char.root_rig] = 0
         for ob in context.selected_objects:
             ob.select_set(False)
         arm.select_set(True)
@@ -86,9 +84,6 @@ class NIRIK_OT_step_construction(bpy.types.Operator):
         total = len(char.rigs[self.rig].constructions)
         cid = (current_construction(arm, self.rig) + self.step) % total
         rig_build.apply_construction(arm, char, self.rig, cid, autokey_frame(context))
-        if "nirik_construction" not in arm:
-            arm["nirik_construction"] = {}
-        arm["nirik_construction"][self.rig] = cid
         return {"FINISHED"}
 
 

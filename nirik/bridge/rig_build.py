@@ -409,6 +409,9 @@ def apply_construction(arm, char: L.Character, rig: str, construction: int, fram
     """Pose sockets and drawings from a library construction; key them if `frame` is given."""
     upm = arm["nirik_units_per_meter"]
     cons = char.rigs[rig].constructions[construction]
+    if "nirik_construction" not in arm:
+        arm["nirik_construction"] = {}
+    arm["nirik_construction"][rig] = construction
     for s in char.rigs[rig].slots:
         entry = cons.slots.get(s.name)
         sock, skew, ctrl = (arm.pose.bones[f"{s.name}.SOCKET"], arm.pose.bones[f"{s.name}.SKEW"],

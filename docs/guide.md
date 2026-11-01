@@ -18,9 +18,9 @@ Body (everything), Head, Mouth, Brow, Blink, Eye. *Eye* selects iris, pupil
 and highlights together, so the look moves as one; the eye shape clips them.
 
 **Character / Head ◀ ▶.** Step through the stock constructions: the body's
-turnarounds and poses, and the head's angles, tilts and expressions. Body and
-head are independent; changing the body keeps the head's own choice per the
-stock rig.
+turnarounds and poses, and the head's angles, tilts and expressions. Each body
+pose comes with the head pose the stock rig pairs with it; step the head
+afterwards to change it on its own.
 
 **Selected part.** Shows the current drawing, its tags (on mouths:
 expression and phoneme, e.g. `happy · a,e,i`) and swap arrows.
