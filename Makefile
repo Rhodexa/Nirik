@@ -23,7 +23,7 @@ link:                 ## symlink nirik/ into Blender's extensions and enable it
 	mkdir -p $(EXT_DIR)
 	ln -sfn $(CURDIR)/nirik $(EXT_DIR)/nirik
 	$(PY) -m devtools.blender_env -b --python-expr \
-	  "import bpy; bpy.ops.preferences.addon_enable(module='bl_ext.user_default.nirik'); bpy.ops.wm.save_userpref()"
+	  "import bpy; m='bl_ext.user_default.nirik'; m in bpy.context.preferences.addons or (bpy.ops.preferences.addon_enable(module=m), bpy.ops.wm.save_userpref())"
 
 unlink:
 	rm -f $(EXT_DIR)/nirik
