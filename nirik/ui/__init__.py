@@ -26,6 +26,17 @@ def active_slot(context, char) -> str | None:
     return pb.name if pb is not None and pb.name in char.all_slots() and "nirik_drawing" in pb else None
 
 
+def redraw_viewports(context):
+    for area in context.screen.areas if context.screen else ():
+        if area.type == "VIEW_3D":
+            area.tag_redraw()
+
+
+def part_label(arm, char, slot: str) -> str:
+    drawing = char.drawings.get(arm.pose.bones[slot]["nirik_drawing"])
+    return controls.drawing_label(drawing.symbol) if drawing else controls.label(slot)
+
+
 def autokey_frame(context) -> int | None:
     ts = context.scene.tool_settings
     return context.scene.frame_current if ts.use_keyframe_insert_auto else None
@@ -84,6 +95,7 @@ class NIRIK_OT_step_construction(bpy.types.Operator):
         total = len(char.rigs[self.rig].constructions)
         cid = (current_construction(arm, self.rig) + self.step) % total
         rig_build.apply_construction(arm, char, self.rig, cid, autokey_frame(context))
+        redraw_viewports(context)
         return {"FINISHED"}
 
 
@@ -128,13 +140,17 @@ class NIRIK_OT_step_drawing(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        arm = nirik_armature(context)
-        return arm is not None and active_slot(context, character_for(arm)) is not None
+        # Deliberately permissive: if poll failed, Alt+Wheel would fall through
+        # to Blender's own binding and scrub the timeline instead.
+        return nirik_armature(context) is not None and context.mode == "POSE"
 
     def execute(self, context):
         arm = nirik_armature(context)
         char = character_for(arm)
         slot = active_slot(context, char)
+        if slot is None:
+            self.report({"INFO"}, "Select a part with drawings (Mouth, Eye, ...) to swap")
+            return {"CANCELLED"}
         current = arm.pose.bones[slot]["nirik_drawing"]
         options = [0] + char.slot_drawings(slot)
         if self.scope == "SYMBOL" and current in char.drawings:
@@ -149,6 +165,7 @@ class NIRIK_OT_step_drawing(bpy.types.Operator):
             pb.keyframe_insert('["nirik_drawing"]', frame=frame)
             pb.keyframe_insert('["nirik_tile"]', frame=frame)
             rig_build.make_constant(arm)
+        redraw_viewports(context)
         return {"FINISHED"}
 
 
@@ -194,7 +211,7 @@ class NIRIK_PT_main(bpy.types.Panel):
             return
         did = arm.pose.bones[slot]["nirik_drawing"]
         drawing = char.drawings.get(did)
-        box.label(text=slot, icon="BONE_DATA")
+        box.label(text=f"{part_label(arm, char, slot)}  ({slot})", icon="BONE_DATA")
         row = box.row(align=True)
         row.operator("nirik.step_drawing", text="", icon="TRIA_LEFT").step = -1
         row.label(text=f"{drawing.symbol} #{did}" if drawing else "(empty)")
@@ -230,9 +247,13 @@ class NIRIK_PT_more(bpy.types.Panel):
                 continue
             layout.label(text=rig)
             grid = layout.grid_flow(columns=2, align=True)
+            seen: dict[str, int] = {}
             for name in showing:
-                op = grid.operator("nirik.select_part", text=controls.label(name),
-                                   depress=arm.pose.bones[name].select)
+                text = part_label(arm, char, name)
+                seen[text] = seen.get(text, 0) + 1
+                if seen[text] > 1:
+                    text = f"{text} {seen[text]}"
+                op = grid.operator("nirik.select_part", text=text, depress=arm.pose.bones[name].select)
                 op.bones = name
 
 

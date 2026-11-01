@@ -125,6 +125,16 @@ def test_more_parts_reveal_one_hidden_bone_at_a_time():
     assert tail.hide and not ear.hide and ear.select
 
 
+def test_wheel_on_non_drawing_part_is_consumed():
+    # Body (ROOT) has no drawings: the swap must still run (and cancel) so the
+    # wheel event doesn't fall through to timeline scrubbing.
+    arm = state["arm"]
+    bpy.ops.object.mode_set(mode="POSE")
+    bpy.ops.nirik.select_part(bones="ROOT")
+    assert bpy.ops.nirik.step_drawing.poll()
+    assert bpy.ops.nirik.step_drawing(step=1) == {"CANCELLED"}
+
+
 def test_swapped_drawing_renders():
     # Two different mouths must render differently: the new tile is live.
     arm = state["arm"]

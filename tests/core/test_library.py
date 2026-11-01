@@ -87,3 +87,11 @@ def test_part_labels():
     assert label("Head.EAR_3") == "Ear 3"
     assert label("Character.=HEADCOMP=") == "Headcomp"
     assert label("Character.Arm OL") == "Arm OL"
+
+
+def test_drawing_labels():
+    from nirik.core.controls import drawing_label
+    assert drawing_label("PTS_Wing_Front") == "Wing Front"
+    assert drawing_label("PTS_HindLeg_3-4nomark") == "Hind Leg 3-4nomark"
+    assert drawing_label("RY_Mouth_3-4") == "Mouth 3-4"
+    assert drawing_label("table_top") == "table top"

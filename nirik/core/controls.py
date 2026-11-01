@@ -7,6 +7,8 @@ as "more" controls.
 
 from __future__ import annotations
 
+import re
+
 from .library import Character
 
 ROOT = "ROOT"
@@ -60,3 +62,14 @@ def more_parts(char: Character) -> dict[str, list[str]]:
         if names:
             out[rig.name] = names
     return out
+
+
+def drawing_label(symbol: str) -> str:
+    """What a drawing shows: 'PTS_Wing_Front' -> 'Wing Front', 'PTS_HindLeg_3-4nomark' ->
+    'Hind Leg 3-4nomark'. Riggers reuse layers (a layer named "Neck" may hold a
+    wing), so the current drawing names a part better than its layer does."""
+    parts = symbol.split("_")
+    if len(parts) > 1 and parts[0].isupper():
+        parts = parts[1:]  # rig code (PTS, RY, ...)
+    words = [w for p in parts for w in re.sub(r"(?<=[a-z])(?=[A-Z])", " ", p).split()]
+    return " ".join(words)
