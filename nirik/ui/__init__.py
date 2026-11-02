@@ -122,17 +122,22 @@ class NIRIK_OT_select_part(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     bones: StringProperty(description="Comma-separated bone names")
+    extend: BoolProperty(description="Add to the selection (Shift+click the button)")
 
     @classmethod
     def poll(cls, context):
         return nirik_armature(context) is not None
+
+    def invoke(self, context, event):
+        self.extend = event.shift
+        return self.execute(context)
 
     def execute(self, context):
         arm = nirik_armature(context)
         if context.mode != "POSE":
             bpy.ops.object.mode_set(mode="POSE")
         names = [n for n in self.bones.split(",") if n in arm.data.bones]
-        select_bones(arm, character_for(arm), names)
+        select_bones(arm, character_for(arm), names, self.extend)
         return {"FINISHED"}
 
 
@@ -301,6 +306,14 @@ class NIRIK_PT_main(bpy.types.Panel):
         row.operator("nirik.layer", text="", icon="TRIA_UP_BAR").how = "FRONT"
         row.operator("nirik.layer", text="", icon="LOOP_BACK").how = "RESET"
         row = box.row(align=True)
+        row.operator("nirik.depth", text="", icon="TRIA_LEFT").how = "BACK"
+        if drawable:
+            row.prop(pb, '["nirik_depth"]', text="Depth")
+        else:
+            row.label(text="Depth")
+        row.operator("nirik.depth", text="", icon="TRIA_RIGHT").how = "FORWARD"
+        row.operator("nirik.depth", text="", icon="LOOP_BACK").how = "RESET"
+        row = box.row(align=True)
         side = pb.get("nirik_side", rig_build.SIDE_AUTO) if drawable else None
         for value, text in ((rig_build.SIDE_AUTO, "Auto"), (rig_build.SIDE_NEAR, "Near"),
                             (rig_build.SIDE_FAR, "Far")):
@@ -354,6 +367,30 @@ class NIRIK_OT_layer(bpy.types.Operator):
         arm = nirik_armature(context)
         char = character_for(arm)
         rig_build.move_layers(arm, char, selected_controls(arm, char), self.how, autokey_frame(context))
+        sync.mark_synced(arm)
+        redraw_viewports(context)
+        return {"FINISHED"}
+
+
+class NIRIK_OT_depth(bpy.types.Operator):
+    """Move the selected parts away from / toward the camera, e.g. a rider's
+    far wing behind the character he sits on"""
+    bl_idname = "nirik.depth"
+    bl_label = "Change Depth"
+    bl_options = {"REGISTER", "UNDO"}
+
+    how: EnumProperty(items=(("BACK", "Push Back", "Away from the camera"),
+                             ("FORWARD", "Pull Forward", "Toward the camera"),
+                             ("RESET", "Reset", "Back to the character's plane")))
+
+    @classmethod
+    def poll(cls, context):
+        return nirik_armature(context) is not None and context.mode == "POSE"
+
+    def execute(self, context):
+        arm = nirik_armature(context)
+        char = character_for(arm)
+        rig_build.move_depth(arm, char, selected_controls(arm, char), self.how, autokey_frame(context))
         sync.mark_synced(arm)
         redraw_viewports(context)
         return {"FINISHED"}
@@ -598,7 +635,7 @@ class NIRIK_PT_more(bpy.types.Panel):
 
 
 classes = (NIRIK_OT_load_character, NIRIK_OT_step_construction, NIRIK_OT_select_part, NIRIK_OT_pick,
-           NIRIK_OT_step_drawing, NIRIK_OT_set_drawing, NIRIK_OT_browse_drawings, NIRIK_OT_layer, NIRIK_OT_set_side, NIRIK_OT_hide, NIRIK_OT_rebuild,
+           NIRIK_OT_step_drawing, NIRIK_OT_set_drawing, NIRIK_OT_browse_drawings, NIRIK_OT_layer, NIRIK_OT_depth, NIRIK_OT_set_side, NIRIK_OT_hide, NIRIK_OT_rebuild,
            NIRIK_UL_layers, NIRIK_PT_main, NIRIK_PT_layers, NIRIK_PT_more)
 _keymaps = []
 
@@ -619,7 +656,8 @@ def register():
             for value, mods, mode, extend in (("PRESS", {}, "PART", False),
                                               ("PRESS", {"shift": True}, "PART", True),
                                               ("PRESS", {"alt": True}, "CYCLE", False),
-                                              ("DOUBLE_CLICK", {}, "EXACT", False)):
+                                              ("DOUBLE_CLICK", {}, "EXACT", False),
+                                              ("DOUBLE_CLICK", {"shift": True}, "EXACT", True)):
                 kmi = km.keymap_items.new("nirik.pick", button, value, **mods)
                 kmi.properties.mode, kmi.properties.extend = mode, extend
                 _keymaps.append((km, kmi))

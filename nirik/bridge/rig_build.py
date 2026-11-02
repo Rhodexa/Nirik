@@ -351,6 +351,7 @@ def build(char: L.Character, collection=None, units_per_meter: float = UNITS_PER
             pb["nirik_drawing"] = 0
             pb["nirik_tile"] = -1
             pb["nirik_layer"] = 0.0  # draw-order offset, in layers
+            pb["nirik_depth"] = 0.0  # meters away from the camera (behind other characters)
             pb["nirik_side"] = SIDE_AUTO
         elif pb.name.endswith(".SOCKET"):
             pb["nirik_color"] = list(IDENTITY_COLOR)
@@ -387,7 +388,8 @@ def build(char: L.Character, collection=None, units_per_meter: float = UNITS_PER
         coll.objects.link(card)
         card.parent = arm
         _drive(card, "location", 1, arm, name, "nirik_layer",
-               expression=f"-({order} + v) * {ORDER_STEP!r}")
+               expression=f"-({order} + v) * {ORDER_STEP!r} + d",
+               extra={"d": f'pose.bones["{name}"]["nirik_depth"]'})
         card["nirik_order"] = order
         group = card.vertex_groups.new(name=name)
         group.add(range(4), 1.0, "REPLACE")
@@ -642,3 +644,21 @@ def set_hidden(char: L.Character, slots, hidden: bool):
         card = card_of(char, s)
         if card is not None:
             card.hide_set(hidden)
+
+
+DEPTH_STEP = 0.01  # meters per Push Back / Pull Forward
+
+
+def move_depth(arm, char: L.Character, bones: list[str], how: str, frame: int | None = None):
+    """Push the parts carried by `bones` away from the camera (BACK), toward it
+    (FORWARD), or RESET. Depth decides overlap with other characters and
+    scene objects; Layer decides order within the character."""
+    for s in {s for b in bones for s in carried_slots(arm, char, b)}:
+        pb = arm.pose.bones[s]
+        pb["nirik_depth"] = {"BACK": pb["nirik_depth"] + DEPTH_STEP,
+                             "FORWARD": pb["nirik_depth"] - DEPTH_STEP, "RESET": 0.0}[how]
+        if frame is not None:
+            pb.keyframe_insert('["nirik_depth"]', frame=frame)
+    if frame is not None:
+        make_constant(arm)
+    arm.update_tag()

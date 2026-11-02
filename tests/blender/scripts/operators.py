@@ -410,6 +410,30 @@ def test_browser_sets_drawing_and_loads_thumbnails():
     assert f"{char.root}:{target}" in ui._previews
 
 
+def test_depth_pushes_carried_parts_behind_and_extend_selects():
+    from nirik.ui import character_for
+    arm = state["arm"]
+    char = character_for(arm)
+    bpy.ops.object.mode_set(mode="POSE")
+    bpy.ops.nirik.select_part(bones="Head.MOUTH")
+    bpy.ops.nirik.select_part(bones="Head.EAR", extend=True)
+    assert {pb.name for pb in arm.pose.bones if pb.select} == {"Head.MOUTH", "Head.EAR"}
+    bpy.ops.nirik.select_part(bones="Character.=HEADCOMP=")
+    head = rig_build.carried_slots(arm, char, "Character.=HEADCOMP=")
+
+    def ys():
+        bpy.context.view_layer.update()
+        return [rig_build.card_of(char, s).matrix_world.translation.y for s in head]
+
+    before = ys()
+    bpy.ops.nirik.depth(how="BACK")
+    bpy.ops.nirik.depth(how="BACK")
+    after = ys()
+    assert all(abs(a - b - 2 * rig_build.DEPTH_STEP) < 1e-6 for a, b in zip(after, before))
+    bpy.ops.nirik.depth(how="RESET")
+    assert ys() == before
+
+
 def test_swapped_drawing_renders():
     # Two different mouths must render differently: the new tile is live.
     arm = state["arm"]

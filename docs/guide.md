@@ -36,6 +36,9 @@ whatever your Blender uses):
 | Double-click | the exact piece under the cursor (an ear, the tail, a wing) |
 | `Alt` + click | cycles through every piece stacked under the cursor |
 | `Shift` + click | adds to the selection |
+| `Shift` + double-click | adds the exact piece (e.g. upper arm + lower arm + hand) |
+
+Shift+click on the Parts and More Parts buttons adds to the selection too.
 
 Clicks are tested against the drawing itself: transparent areas, and parts
 hidden by a mask (an iris under the eyelid), pass through to whatever is
@@ -55,6 +58,11 @@ In the Nirik tab, for the selected part (and everything it carries):
 - **Layer** arrows: back one / forward one visible part, all the way to the
   back / front, or reset to the stock order. Keyed with auto-key, so a leg
   can cross in front of the body for a few frames.
+- **Depth** arrows: push parts away from the camera (1 cm per click) or pull
+  them forward. Layer orders parts *within* a character; Depth decides
+  overlap *between* characters and scene objects. Spike riding Twilight:
+  place Spike slightly in front of her, then push his far wing and far
+  limbs back so they tuck behind her body.
 - **Auto / Near / Far**: *Auto* uses the stock pose's shading; *Far* applies
   the character's far-limb darkening (learned from her stock poses); *Near*
   removes it. Use *Far* when you move a limb behind the body.
