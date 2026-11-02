@@ -2,7 +2,7 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
 from bpy_extras import view3d_utils
 
-from ..bridge import picking, rig_build, sync
+from ..bridge import picking, relink, rig_build, sync
 from ..core import controls, library
 from . import overlay
 
@@ -648,6 +648,7 @@ def register():
     for cls in classes:
         bpy.utils.register_class(cls)
     sync.register()
+    relink.register()
     overlay.register()
     kc = bpy.context.window_manager.keyconfigs.addon
     if kc:
@@ -671,6 +672,7 @@ def register():
 
 def unregister():
     overlay.unregister()
+    relink.unregister()
     sync.unregister()
     for km, kmi in _keymaps:
         km.keymap_items.remove(kmi)

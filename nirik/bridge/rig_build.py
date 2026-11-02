@@ -68,7 +68,8 @@ def ensure_in_palette(arm: bpy.types.Object, char: L.Character, slot: str, drawi
     link = folder / f"t.{tile}.png"
     if link.is_symlink() or link.exists():
         link.unlink()
-    os.symlink(char.drawing_path(drawing), link)
+    # Relative, so renaming or moving the project folder keeps tiles valid.
+    os.symlink(os.path.relpath(char.drawing_path(drawing), folder), link)
     pal.append(drawing)
     palettes = arm["nirik_palettes"]
     palettes[slot] = pal
