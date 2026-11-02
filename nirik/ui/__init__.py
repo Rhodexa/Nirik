@@ -4,6 +4,7 @@ from bpy_extras import view3d_utils
 
 from ..bridge import picking, rig_build, sync
 from ..core import controls, library
+from . import overlay
 
 _characters: dict[str, library.Character] = {}  # disposable cache: library path -> Character
 
@@ -275,14 +276,40 @@ class NIRIK_PT_main(bpy.types.Panel):
         row.operator("screen.keyframe_jump", text="Prev Key", icon="PREV_KEYFRAME").next = False
         row.operator("screen.keyframe_jump", text="Next Key", icon="NEXT_KEYFRAME").next = True
 
-        slot = active_slot(context, char)
+        pb = context.active_pose_bone if context.mode == "POSE" else None
         box = layout.box()
-        if slot is None:
-            box.label(text="Pose mode: select a part's bone", icon="BONE_DATA")
+        if pb is None or not (pb.name == "ROOT" or pb.name in char.all_slots()):
+            box.label(text="Pose mode: click a part", icon="BONE_DATA")
             return
+        slot = active_slot(context, char)
+        drawable = slot is not None and char.all_slots()[slot].canvas is not None
+        box.label(text=part_label(arm, char, slot) if drawable else
+                  ("Body" if pb.name == "ROOT" else char.all_slots()[pb.name].child_rig or pb.name),
+                  icon="BONE_DATA")
+
+        # Layer and side act on everything the selection carries.
+        row = box.row(align=True)
+        row.operator("nirik.layer", text="", icon="TRIA_DOWN_BAR").how = "BACK"
+        row.operator("nirik.layer", text="", icon="TRIA_DOWN").how = "BACKWARD"
+        if drawable:
+            sub = row.row(align=True)
+            sub.enabled = False
+            sub.prop(pb, '["nirik_layer"]', text="Layer")
+        else:
+            row.label(text="Layer")
+        row.operator("nirik.layer", text="", icon="TRIA_UP").how = "FORWARD"
+        row.operator("nirik.layer", text="", icon="TRIA_UP_BAR").how = "FRONT"
+        row.operator("nirik.layer", text="", icon="LOOP_BACK").how = "RESET"
+        row = box.row(align=True)
+        side = pb.get("nirik_side", rig_build.SIDE_AUTO) if drawable else None
+        for value, text in ((rig_build.SIDE_AUTO, "Auto"), (rig_build.SIDE_NEAR, "Near"),
+                            (rig_build.SIDE_FAR, "Far")):
+            row.operator("nirik.set_side", text=text, depress=side == value).side = value
+        if not slot:
+            return
+
         did = arm.pose.bones[slot]["nirik_drawing"]
         drawing = char.drawings.get(did)
-        box.label(text=f"{part_label(arm, char, slot)}  ({slot})", icon="BONE_DATA")
         row = box.row(align=True)
         row.operator("nirik.step_drawing", text="", icon="TRIA_LEFT").step = -1
         sub = row.row(align=True)
@@ -296,6 +323,60 @@ class NIRIK_PT_main(bpy.types.Panel):
                        f"{len(rig_build.palette(arm, slot))} loaded", icon="IMAGE_DATA")
         box.label(text="Alt+Wheel: swap (same set)", icon="MOUSE_MMB_SCROLL")
         box.label(text="Ctrl+Alt+Wheel: swap (all)", icon="MOUSE_MMB_SCROLL")
+
+
+def selected_controls(arm, char) -> list[str]:
+    slots = char.all_slots()
+    return [pb.name for pb in arm.pose.bones if pb.select and (pb.name == "ROOT" or pb.name in slots)]
+
+
+class NIRIK_OT_layer(bpy.types.Operator):
+    """Restack the selected parts (and everything they carry)"""
+    bl_idname = "nirik.layer"
+    bl_label = "Change Layer"
+    bl_options = {"REGISTER", "UNDO"}
+
+    how: EnumProperty(items=(
+        ("FORWARD", "Forward", "In front of the next visible part"),
+        ("BACKWARD", "Backward", "Behind the next visible part"),
+        ("FRONT", "To Front", "In front of every other part"),
+        ("BACK", "To Back", "Behind every other part"),
+        ("RESET", "Reset", "Back to the stock layer order"),
+    ))
+
+    @classmethod
+    def poll(cls, context):
+        return nirik_armature(context) is not None and context.mode == "POSE"
+
+    def execute(self, context):
+        arm = nirik_armature(context)
+        char = character_for(arm)
+        rig_build.move_layers(arm, char, selected_controls(arm, char), self.how, autokey_frame(context))
+        sync.mark_synced(arm)
+        redraw_viewports(context)
+        return {"FINISHED"}
+
+
+class NIRIK_OT_set_side(bpy.types.Operator):
+    """Near/far shading of the selected parts: Auto follows the stock pose,
+    Far applies the character's far-limb darkening"""
+    bl_idname = "nirik.set_side"
+    bl_label = "Set Side"
+    bl_options = {"REGISTER", "UNDO"}
+
+    side: IntProperty(min=0, max=2)
+
+    @classmethod
+    def poll(cls, context):
+        return nirik_armature(context) is not None and context.mode == "POSE"
+
+    def execute(self, context):
+        arm = nirik_armature(context)
+        char = character_for(arm)
+        rig_build.set_side(arm, char, selected_controls(arm, char), self.side, autokey_frame(context))
+        sync.mark_synced(arm)
+        redraw_viewports(context)
+        return {"FINISHED"}
 
 
 class NIRIK_OT_rebuild(bpy.types.Operator):
@@ -351,7 +432,8 @@ class NIRIK_PT_more(bpy.types.Panel):
 
 
 classes = (NIRIK_OT_load_character, NIRIK_OT_step_construction, NIRIK_OT_select_part, NIRIK_OT_pick,
-           NIRIK_OT_step_drawing, NIRIK_OT_rebuild, NIRIK_PT_main, NIRIK_PT_more)
+           NIRIK_OT_step_drawing, NIRIK_OT_layer, NIRIK_OT_set_side, NIRIK_OT_rebuild,
+           NIRIK_PT_main, NIRIK_PT_more)
 _keymaps = []
 
 
@@ -359,6 +441,7 @@ def register():
     for cls in classes:
         bpy.utils.register_class(cls)
     sync.register()
+    overlay.register()
     kc = bpy.context.window_manager.keyconfigs.addon
     if kc:
         km = kc.keymaps.new(name="Pose", space_type="EMPTY")
@@ -378,6 +461,7 @@ def register():
 
 
 def unregister():
+    overlay.unregister()
     sync.unregister()
     for km, kmi in _keymaps:
         km.keymap_items.remove(kmi)

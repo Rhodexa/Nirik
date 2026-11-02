@@ -41,6 +41,24 @@ Clicks are tested against the drawing itself: transparent areas, and parts
 hidden by a mask (an iris under the eyelid), pass through to whatever is
 behind, or to Blender's normal selection.
 
+## Overlay
+
+With a part selected, the viewport shows a box around the artwork it moves
+(Head: the whole head), a cross at its pivot, and its name. Toggle it with
+the armature button in the viewport header; Blender's own *Overlays* switch
+hides it too.
+
+## Layers and sides
+
+In the Nirik tab, for the selected part (and everything it carries):
+
+- **Layer** arrows: back one / forward one visible part, all the way to the
+  back / front, or reset to the stock order. Keyed with auto-key, so a leg
+  can cross in front of the body for a few frames.
+- **Auto / Near / Far**: *Auto* uses the stock pose's shading; *Far* applies
+  the character's far-limb darkening (learned from her stock poses); *Near*
+  removes it. Use *Far* when you move a limb behind the body.
+
 ## Posing
 
 With a part selected, use Blender as usual: `G` move, `R` rotate, `S` scale.

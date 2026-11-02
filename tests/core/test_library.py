@@ -103,3 +103,13 @@ def test_click_on_slot_selects_its_part(tmp_path):
     assert part_for_slot(ch, "Head.IRIS") == ["Head.IRIS"]        # eye look
     assert part_for_slot(ch, "Head.SKULL") == ["Character.HEAD"]  # rest of the face -> head
     assert part_for_slot(ch, "Character.Tail") == ["ROOT"]        # body pieces -> body
+
+
+def test_far_color_is_the_common_darkening(tmp_path):
+    ch = L.load(write_library(tmp_path))
+    assert ch.far_color() is None  # the test rig only has a multiply tint
+    dark = (1.0, 1.0, 1.0, 1.0, -16.0, -21.0, -16.0, 0.0)
+    for _ in range(2):
+        ch.rigs["Head"].constructions[0].slots["Head.SKULL"].color = dark
+    ch.rigs["Character"].constructions[0].slots["Character.Body"].color = dark
+    assert ch.far_color() == dark

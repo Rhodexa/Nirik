@@ -47,7 +47,7 @@ def alpha_at(char: L.Character, drawing: int, u: float, v: float) -> float:
 @dataclass
 class Hit:
     slot: str
-    order: int     # draw order: higher is in front
+    order: float   # effective draw order (stock order + layer offset): higher is in front
     depth: float   # distance along the ray
 
 
@@ -102,6 +102,6 @@ def hits(arm, char: L.Character, origin: Vector, direction: Vector, depsgraph) -
         masked_by = char.all_slots()[name].masked_by
         if masked_by and _mask_alpha(arm, char, masked_by, point, depsgraph) < ALPHA_HIT:
             continue
-        found.append(Hit(name, i, dist))
+        found.append(Hit(name, card["nirik_order"] + arm.pose.bones[name]["nirik_layer"], dist))
     found.sort(key=lambda h: -h.order)
     return found

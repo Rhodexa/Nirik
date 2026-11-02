@@ -279,6 +279,95 @@ def test_auto_sync_after_retiming():
     assert 20 in socket_frames and 10 not in socket_frames
 
 
+def test_all_drivers_are_simple_expressions():
+    # Simple expressions evaluate without Python: renders work with scripts off.
+    bad = [(ob.name, fc.data_path) for ob in bpy.data.objects if ob.animation_data
+           for fc in ob.animation_data.drivers if not fc.driver.is_simple_expression]
+    assert not bad, bad[:5]
+    # ... and they pass through unaltered (no remapping keys or modifiers).
+    shaped = [(ob.name, fc.data_path) for ob in bpy.data.objects if ob.animation_data
+              for fc in ob.animation_data.drivers if len(fc.keyframe_points) or len(fc.modifiers)]
+    assert not shaped, shaped[:5]
+
+
+def test_layer_moves_restack_cards_and_picking():
+    from nirik.ui import character_for
+    arm = state["arm"]
+    char = character_for(arm)
+    arm.animation_data_clear()
+    rig_build.apply_construction(arm, char, "Character", 4)
+    bpy.ops.object.mode_set(mode="POSE")
+    visible = [s for s in char.draw_order() if arm.pose.bones[s]["nirik_drawing"]]
+    leg = next(s for s in visible if "Hind leg" in s or "Leg" in s)
+    others = [s for s in visible if s != leg]
+
+    def y(slot):
+        bpy.context.view_layer.update()
+        return bpy.data.objects[f"twilight:{slot}"].matrix_world.translation.y
+
+    bpy.ops.nirik.select_part(bones=leg)
+    assert bpy.ops.nirik.layer(how="FRONT") == {"FINISHED"}
+    assert all(y(leg) < y(o) for o in others)  # more negative y = closer to camera
+    bpy.ops.nirik.layer(how="BACK")
+    assert all(y(leg) > y(o) for o in others)
+    bpy.ops.nirik.layer(how="RESET")
+    assert arm.pose.bones[leg]["nirik_layer"] == 0
+
+
+def test_head_layer_moves_everything_it_carries():
+    from nirik.ui import character_for
+    arm = state["arm"]
+    char = character_for(arm)
+    head = rig_build.carried_slots(arm, char, "Character.=HEADCOMP=")
+    bpy.ops.nirik.select_part(bones="Character.=HEADCOMP=")
+    before = [rig_build.effective_order(arm, char, s) for s in head]
+    bpy.ops.nirik.layer(how="BACK")
+    after = [rig_build.effective_order(arm, char, s) for s in head]
+    assert len({a - b for a, b in zip(after, before)}) == 1 and after[0] < before[0]
+    bpy.ops.nirik.layer(how="RESET")
+
+
+def test_far_side_darkens():
+    from nirik.ui import character_for
+    arm = state["arm"]
+    char = character_for(arm)
+    slot = next(s for s in char.draw_order() if arm.pose.bones[s]["nirik_drawing"]
+                and arm.pose.bones[f"{s}.SOCKET"]["nirik_color"][4] == 0)
+    card = bpy.data.objects[f"twilight:{slot}"]
+    bpy.ops.nirik.select_part(bones=slot)
+
+    def off():
+        bpy.context.view_layer.update()
+        return list(card.evaluated_get(bpy.context.evaluated_depsgraph_get())["nirik_off"])
+
+    assert off()[:3] == [0, 0, 0]
+    bpy.ops.nirik.set_side(side=rig_build.SIDE_FAR)
+    assert off()[:3] == list(char.far_color()[4:7])
+    bpy.ops.nirik.set_side(side=rig_build.SIDE_AUTO)
+    assert off()[:3] == [0, 0, 0]
+
+
+def test_overlay_box_covers_carried_artwork():
+    from nirik.ui import character_for, overlay
+    arm = state["arm"]
+    char = character_for(arm)
+    dg = bpy.context.evaluated_depsgraph_get()
+    body = overlay.artwork_corners(arm, char, "ROOT", dg)
+    mouth = overlay.artwork_corners(arm, char, "Head.MOUTH", dg)
+    assert body and mouth and len(mouth) == 4
+
+    def box(points):
+        return min(p.x for p in points), min(p.z for p in points), max(p.x for p in points), max(p.z for p in points)
+
+    bx0, bz0, bx1, bz1 = box(body)
+    mx0, mz0, mx1, mz1 = box(mouth)
+    assert bx0 <= mx0 and bz0 <= mz0 and mx1 <= bx1 and mz1 <= bz1
+    # Tight to the artwork, not the padded canvas
+    card = bpy.data.objects["twilight:Head.MOUTH"].evaluated_get(dg)
+    canvas = [card.matrix_world @ v.co for v in card.data.vertices]
+    assert (mx1 - mx0) < (max(p.x for p in canvas) - min(p.x for p in canvas))
+
+
 def test_swapped_drawing_renders():
     # Two different mouths must render differently: the new tile is live.
     arm = state["arm"]

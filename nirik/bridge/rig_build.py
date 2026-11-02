@@ -39,6 +39,7 @@ ORDER_STEP = 0.00001
 BONE_LENGTH = 0.05
 IDENTITY_COLOR = (1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0)
 UDIM_COLUMNS = 10
+SIDE_AUTO, SIDE_NEAR, SIDE_FAR = 0, 1, 2
 
 
 def safe(name: str) -> str:
@@ -269,16 +270,28 @@ def build_material(char: L.Character, slot: L.Slot, image, mask_image=None, mask
 
 # ── drivers ──────────────────────────────────────────────────────────────────
 
-def _drive(obj, prop: str, index: int, arm, bone: str, bone_prop: str, bone_index: int | None = None):
-    fc = obj.driver_add(f'["{prop}"]', index) if index >= 0 else obj.driver_add(f'["{prop}"]')
+def _drive(obj, prop: str, index: int, arm, bone: str, bone_prop: str, bone_index: int | None = None,
+           expression: str = "v", extra: dict[str, str] | None = None):
+    """Drive obj[prop] from a bone property. `expression` must stay a simple
+    expression (arithmetic, comparisons, `a if c else b`): those evaluate
+    without Python, so renders never need scripts enabled."""
+    path = f'["{prop}"]' if prop != "location" else "location"
+    fc = obj.driver_add(path, index) if index >= 0 else obj.driver_add(path)
+    # Blender seeds some driver curves (e.g. location) with keyframes that
+    # remap and clamp the driver's output; drivers here must pass through.
+    while fc.keyframe_points:
+        fc.keyframe_points.remove(fc.keyframe_points[0])
+    while fc.modifiers:
+        fc.modifiers.remove(fc.modifiers[0])
     drv = fc.driver
     drv.type = "SCRIPTED"
-    var = drv.variables.new()
-    var.name = "v"
-    var.targets[0].id = arm
     suffix = f"[{bone_index}]" if bone_index is not None else ""
-    var.targets[0].data_path = f'pose.bones["{bone}"]["{bone_prop}"]{suffix}'
-    drv.expression = "v"  # simple expression: no Python needed at render time
+    for name, data_path in {"v": f'pose.bones["{bone}"]["{bone_prop}"]{suffix}', **(extra or {})}.items():
+        var = drv.variables.new()
+        var.name = name
+        var.targets[0].id = arm
+        var.targets[0].data_path = data_path
+    drv.expression = expression
 
 
 # ── build ────────────────────────────────────────────────────────────────────
@@ -337,6 +350,8 @@ def build(char: L.Character, collection=None, units_per_meter: float = UNITS_PER
         if pb.name in slots:
             pb["nirik_drawing"] = 0
             pb["nirik_tile"] = -1
+            pb["nirik_layer"] = 0.0  # draw-order offset, in layers
+            pb["nirik_side"] = SIDE_AUTO
         elif pb.name.endswith(".SOCKET"):
             pb["nirik_color"] = list(IDENTITY_COLOR)
 
@@ -352,6 +367,8 @@ def build(char: L.Character, collection=None, units_per_meter: float = UNITS_PER
             empty.scale = ((x1 - x0) / units_per_meter, (y1 - y0) / units_per_meter, 1)
             empty.hide_select = True
             mask_empties[s.name] = empty
+
+    far = char.far_color() or IDENTITY_COLOR
 
     # Cards, back to front.
     for order, name in enumerate(char.draw_order()):
@@ -369,7 +386,9 @@ def build(char: L.Character, collection=None, units_per_meter: float = UNITS_PER
         card = bpy.data.objects.new(f"{char.name}:{name}", mesh)
         coll.objects.link(card)
         card.parent = arm
-        card.location = (0, -order * ORDER_STEP, 0)
+        _drive(card, "location", 1, arm, name, "nirik_layer",
+               expression=f"-({order} + v) * {ORDER_STEP!r}")
+        card["nirik_order"] = order
         group = card.vertex_groups.new(name=name)
         group.add(range(4), 1.0, "REPLACE")
         mod = card.modifiers.new("Nirik", "ARMATURE")
@@ -380,8 +399,15 @@ def build(char: L.Character, collection=None, units_per_meter: float = UNITS_PER
         card["nirik_off"] = [0.0, 0.0, 0.0, 0.0]
         _drive(card, "nirik_tile", -1, arm, name, "nirik_tile")
         for i in range(4):
-            _drive(card, "nirik_mult", i, arm, f"{name}.SOCKET", "nirik_color", i)
-            _drive(card, "nirik_off", i, arm, f"{name}.SOCKET", "nirik_color", 4 + i)
+            # Side: auto = the stock pose's color, near = none, far = the
+            # character's far-limb darkening.
+            side = {"s": f'pose.bones["{name}"]["nirik_side"]'}
+            _drive(card, "nirik_mult", i, arm, f"{name}.SOCKET", "nirik_color", i,
+                   expression=f"v if s == {SIDE_AUTO} else (1.0 if s == {SIDE_NEAR} else {far[i]!r})",
+                   extra=side)
+            _drive(card, "nirik_off", i, arm, f"{name}.SOCKET", "nirik_color", 4 + i,
+                   expression=f"v if s == {SIDE_AUTO} else (0.0 if s == {SIDE_NEAR} else {far[4 + i]!r})",
+                   extra=side)
 
         mask_image = mask_empty = None
         if s.masked_by:
@@ -543,3 +569,56 @@ def make_constant(arm):
         if is_nirik(fc.data_path):
             for kp in fc.keyframe_points:
                 kp.interpolation = "CONSTANT"
+
+
+# ── layers and sides ─────────────────────────────────────────────────────────
+
+def carried_slots(arm, char: L.Character, bone: str) -> list[str]:
+    """Drawable slots that move with `bone`: its own card and every card below it."""
+    names = {bone} | {b.name for b in arm.data.bones[bone].children_recursive}
+    return [s for s in char.draw_order() if s in names]
+
+
+def effective_order(arm, char: L.Character, slot: str) -> float:
+    card = bpy.data.objects.get(f"{char.name}:{slot}")
+    return card["nirik_order"] + arm.pose.bones[slot]["nirik_layer"] if card else 0.0
+
+
+def move_layers(arm, char: L.Character, bones: list[str], how: str, frame: int | None = None):
+    """Restack the parts carried by `bones`: FORWARD/BACKWARD past the next
+    visible part, FRONT/BACK past all of them, RESET to the stock order."""
+    moving = {s for b in bones for s in carried_slots(arm, char, b)}
+    if not moving:
+        return
+    if how == "RESET":
+        delta_for = {s: -arm.pose.bones[s]["nirik_layer"] for s in moving}
+    else:
+        visible = [s for s in char.draw_order() if arm.pose.bones[s]["nirik_drawing"]]
+        others = [effective_order(arm, char, s) for s in visible if s not in moving]
+        mine = [effective_order(arm, char, s) for s in moving]
+        lo, hi = min(mine), max(mine)
+        above, below = [o for o in others if o > hi], [o for o in others if o < lo]
+        delta = {"FRONT": (max(others) - lo + 1) if above else 0,
+                 "BACK": (min(others) - hi - 1) if below else 0,
+                 "FORWARD": (min(above) - lo + 0.5) if above else 0,
+                 "BACKWARD": (max(below) - hi - 0.5) if below else 0}[how]
+        delta_for = {s: delta for s in moving}
+    for s, d in delta_for.items():
+        pb = arm.pose.bones[s]
+        pb["nirik_layer"] = pb["nirik_layer"] + d
+        if frame is not None:
+            pb.keyframe_insert('["nirik_layer"]', frame=frame)
+    if frame is not None:
+        make_constant(arm)
+    arm.update_tag()
+
+
+def set_side(arm, char: L.Character, bones: list[str], side: int, frame: int | None = None):
+    for s in {s for b in bones for s in carried_slots(arm, char, b)}:
+        pb = arm.pose.bones[s]
+        pb["nirik_side"] = side
+        if frame is not None:
+            pb.keyframe_insert('["nirik_side"]', frame=frame)
+    if frame is not None:
+        make_constant(arm)
+    arm.update_tag()

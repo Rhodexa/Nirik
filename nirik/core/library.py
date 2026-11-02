@@ -81,6 +81,18 @@ class Character:
     def slot_drawings(self, slot: str) -> list[int]:
         return sorted(d.id for d in self.drawings.values() if d.slot == slot)
 
+    def far_color(self) -> tuple[float, ...] | None:
+        """The darkening the riggers apply to far-side limbs: the most common
+        darkening color transform across the stock poses (mult + offset)."""
+        counts: dict[tuple, int] = {}
+        for rig in self.rigs.values():
+            for cons in rig.constructions:
+                for entry in cons.slots.values():
+                    c = entry.color
+                    if c and c[3] == 1 and c[7] == 0 and sum(c[4:7]) < 0 and min(c[:3]) >= 0.99:
+                        counts[c] = counts.get(c, 0) + 1
+        return max(counts, key=counts.get) if counts else None
+
     def draw_order(self, construction: int | None = None) -> list[str]:
         """Drawable slots back to front, expanding child rigs in place.
 
