@@ -396,6 +396,20 @@ def test_layers_list_and_hiding():
     assert arm.pose.bones[rows[0]].select
 
 
+def test_browser_sets_drawing_and_loads_thumbnails():
+    from nirik.ui import character_for, drawing_icon
+    arm = state["arm"]
+    char = character_for(arm)
+    bpy.ops.object.mode_set(mode="POSE")
+    bpy.ops.nirik.select_part(bones="Head.MOUTH")
+    target = char.slot_drawings("Head.MOUTH")[3]
+    assert bpy.ops.nirik.set_drawing(drawing=target) == {"FINISHED"}
+    assert arm.pose.bones["Head.MOUTH"]["nirik_drawing"] == target
+    import nirik.ui as ui
+    drawing_icon(char, target)  # icons render only in a UI session; check registration
+    assert f"{char.root}:{target}" in ui._previews
+
+
 def test_swapped_drawing_renders():
     # Two different mouths must render differently: the new tile is live.
     arm = state["arm"]

@@ -317,6 +317,7 @@ class NIRIK_PT_main(bpy.types.Panel):
         sub.enabled = False
         sub.prop(arm.pose.bones[slot], '["nirik_drawing"]', text="Drawing")
         row.operator("nirik.step_drawing", text="", icon="TRIA_RIGHT").step = 1
+        box.operator("nirik.browse_drawings", text="Browse Drawings (Alt+D)", icon="IMAGE_DATA")
         box.label(text=drawing.symbol if drawing else "(empty)")
         if drawing and drawing.tags:
             box.label(text=" · ".join(drawing.tags), icon="BOOKMARKS")
@@ -462,6 +463,84 @@ class NIRIK_PT_layers(bpy.types.Panel):
         row.operator("nirik.hide", text="Show All", icon="HIDE_OFF").action = "SHOW_ALL"
 
 
+_previews = None  # bpy.utils.previews collection: drawing thumbnails, loaded lazily
+BROWSER_LIMIT = 96
+
+
+def drawing_icon(char, drawing: int) -> int:
+    key = f"{char.root}:{drawing}"
+    if key not in _previews:
+        _previews.load(key, str(char.drawing_path(drawing)), "IMAGE")
+    return _previews[key].icon_id
+
+
+class NIRIK_OT_set_drawing(bpy.types.Operator):
+    """Show this drawing on the selected part (keyed with auto-key)"""
+    bl_idname = "nirik.set_drawing"
+    bl_label = "Use Drawing"
+    bl_options = {"REGISTER", "UNDO"}
+
+    drawing: IntProperty()
+
+    @classmethod
+    def poll(cls, context):
+        arm = nirik_armature(context)
+        return arm is not None and active_slot(context, character_for(arm)) is not None
+
+    def execute(self, context):
+        arm = nirik_armature(context)
+        char = character_for(arm)
+        slot = active_slot(context, char)
+        rig_build.set_drawing(arm, char, slot, self.drawing)
+        frame = autokey_frame(context)
+        if frame is not None:
+            rig_build.key_drawing(arm, slot, frame)
+            sync.mark_synced(arm)
+        redraw_viewports(context)
+        return {"FINISHED"}
+
+
+class NIRIK_OT_browse_drawings(bpy.types.Operator):
+    """Pick a drawing for the selected part from thumbnails"""
+    bl_idname = "nirik.browse_drawings"
+    bl_label = "Drawings"
+
+    show_all: BoolProperty(name="All", description="Every drawing this part can show, not just the current set")
+
+    @classmethod
+    def poll(cls, context):
+        arm = nirik_armature(context)
+        return arm is not None and active_slot(context, character_for(arm)) is not None
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_popup(self, width=720)
+
+    def execute(self, context):
+        return {"FINISHED"}
+
+    def draw(self, context):
+        arm = nirik_armature(context)
+        char = character_for(arm)
+        slot = active_slot(context, char)
+        current = arm.pose.bones[slot]["nirik_drawing"]
+        options = char.slot_drawings(slot)
+        if not self.show_all and current in char.drawings:
+            options = [d for d in options if char.drawings[d].symbol == char.drawings[current].symbol]
+        layout = self.layout
+        row = layout.row()
+        row.label(text=f"{part_label(arm, char, slot)}: {len(options)} drawings")
+        row.prop(self, "show_all", toggle=True)
+        grid = layout.grid_flow(columns=6, even_columns=True, align=True)
+        for d in options[:BROWSER_LIMIT]:
+            col = grid.column(align=True)
+            col.template_icon(icon_value=drawing_icon(char, d), scale=5.0)
+            tags = " · ".join(t for t in char.drawings[d].tags if t.strip("- "))[:22]
+            op = col.operator("nirik.set_drawing", text=tags or f"#{d}", depress=d == current)
+            op.drawing = d
+        if len(options) > BROWSER_LIMIT:
+            layout.label(text=f"First {BROWSER_LIMIT} shown; Alt+Wheel reaches the rest")
+
+
 class NIRIK_OT_rebuild(bpy.types.Operator):
     """Re-sync the rig's hidden channels with the visible construction and
     drawing keys (after moving or deleting them in the Dope Sheet)"""
@@ -515,12 +594,15 @@ class NIRIK_PT_more(bpy.types.Panel):
 
 
 classes = (NIRIK_OT_load_character, NIRIK_OT_step_construction, NIRIK_OT_select_part, NIRIK_OT_pick,
-           NIRIK_OT_step_drawing, NIRIK_OT_layer, NIRIK_OT_set_side, NIRIK_OT_hide, NIRIK_OT_rebuild,
+           NIRIK_OT_step_drawing, NIRIK_OT_set_drawing, NIRIK_OT_browse_drawings, NIRIK_OT_layer, NIRIK_OT_set_side, NIRIK_OT_hide, NIRIK_OT_rebuild,
            NIRIK_UL_layers, NIRIK_PT_main, NIRIK_PT_layers, NIRIK_PT_more)
 _keymaps = []
 
 
 def register():
+    global _previews
+    import bpy.utils.previews
+    _previews = bpy.utils.previews.new()
     bpy.types.Object.nirik_layer_index = IntProperty(default=-1, update=_layer_index_changed)
     for cls in classes:
         bpy.utils.register_class(cls)
@@ -537,6 +619,7 @@ def register():
                 kmi = km.keymap_items.new("nirik.pick", button, value, **mods)
                 kmi.properties.mode, kmi.properties.extend = mode, extend
                 _keymaps.append((km, kmi))
+        _keymaps.append((km, km.keymap_items.new("nirik.browse_drawings", "D", "PRESS", alt=True)))
         for key, step in (("WHEELUPMOUSE", -1), ("WHEELDOWNMOUSE", 1)):
             for ctrl, scope in ((False, "SYMBOL"), (True, "SLOT")):
                 kmi = km.keymap_items.new("nirik.step_drawing", key, "PRESS", alt=True, ctrl=ctrl)
@@ -553,3 +636,4 @@ def unregister():
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
     del bpy.types.Object.nirik_layer_index
+    bpy.utils.previews.remove(_previews)
