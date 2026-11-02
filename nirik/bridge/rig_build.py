@@ -622,3 +622,23 @@ def set_side(arm, char: L.Character, bones: list[str], side: int, frame: int | N
     if frame is not None:
         make_constant(arm)
     arm.update_tag()
+
+
+# ── viewport visibility ──────────────────────────────────────────────────────
+
+def stack(arm, char: L.Character) -> list[str]:
+    """Parts showing a drawing, front first, in their current (offset) order."""
+    shown = [s for s in char.draw_order() if arm.pose.bones[s]["nirik_drawing"]]
+    return sorted(shown, key=lambda s: -effective_order(arm, char, s))
+
+
+def card_of(char: L.Character, slot: str):
+    return bpy.data.objects.get(f"{char.name}:{slot}")
+
+
+def set_hidden(char: L.Character, slots, hidden: bool):
+    """Viewport-only hiding (renders unaffected), e.g. hide a blink to pose the eye."""
+    for s in slots:
+        card = card_of(char, s)
+        if card is not None:
+            card.hide_set(hidden)

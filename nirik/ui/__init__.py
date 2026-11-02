@@ -305,6 +305,7 @@ class NIRIK_PT_main(bpy.types.Panel):
         for value, text in ((rig_build.SIDE_AUTO, "Auto"), (rig_build.SIDE_NEAR, "Near"),
                             (rig_build.SIDE_FAR, "Far")):
             row.operator("nirik.set_side", text=text, depress=side == value).side = value
+        row.operator("nirik.hide", text="", icon="HIDE_ON").action = "HIDE"
         if not slot:
             return
 
@@ -379,6 +380,88 @@ class NIRIK_OT_set_side(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class NIRIK_OT_hide(bpy.types.Operator):
+    """Hide or show parts in the viewport only (renders are unaffected)"""
+    bl_idname = "nirik.hide"
+    bl_label = "Hide Parts"
+    bl_options = {"REGISTER", "UNDO"}
+
+    slot: StringProperty(description="One part; empty = the selection")
+    action: EnumProperty(items=(("TOGGLE", "Toggle", ""), ("HIDE", "Hide", ""), ("SHOW_ALL", "Show All", "")))
+
+    @classmethod
+    def poll(cls, context):
+        return nirik_armature(context) is not None
+
+    def execute(self, context):
+        arm = nirik_armature(context)
+        char = character_for(arm)
+        if self.action == "SHOW_ALL":
+            rig_build.set_hidden(char, char.draw_order(), False)
+        elif self.slot:
+            card = rig_build.card_of(char, self.slot)
+            rig_build.set_hidden(char, [self.slot], not card.hide_get())
+        else:
+            parts = {s for b in selected_controls(arm, char) for s in rig_build.carried_slots(arm, char, b)}
+            rig_build.set_hidden(char, parts, True)
+        redraw_viewports(context)
+        return {"FINISHED"}
+
+
+class NIRIK_UL_layers(bpy.types.UIList):
+    """Parts front to back, as currently stacked."""
+
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        arm = data.id_data
+        char = character_for(arm)
+        card = rig_build.card_of(char, item.name)
+        hidden = card is not None and card.hide_get()
+        row = layout.row(align=True)
+        op = row.operator("nirik.hide", text="", icon="HIDE_ON" if hidden else "HIDE_OFF", emboss=False)
+        op.slot, op.action = item.name, "TOGGLE"
+        row.label(text=part_label(arm, char, item.name), icon="SELECT_SET" if item.select else "BLANK1")
+
+    def filter_items(self, context, data, propname):
+        bones = getattr(data, propname)
+        arm = data.id_data
+        rows = rig_build.stack(arm, character_for(arm))
+        position = {name: i for i, name in enumerate(rows)}
+        flags = [self.bitflag_filter_item if pb.name in position else 0 for pb in bones]
+        order = sorted(range(len(bones)), key=lambda i: position.get(bones[i].name, len(rows) + i))
+        new_order = [0] * len(bones)
+        for new, old in enumerate(order):
+            new_order[old] = new
+        return flags, new_order
+
+
+def _layer_index_changed(arm, context):
+    """Clicking a row in the Layers list selects that part."""
+    bones = arm.pose.bones
+    if 0 <= arm.nirik_layer_index < len(bones) and context.mode == "POSE":
+        select_bones(arm, character_for(arm), [bones[arm.nirik_layer_index].name])
+
+
+class NIRIK_PT_layers(bpy.types.Panel):
+    bl_label = "Layers"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "Nirik"
+    bl_parent_id = "NIRIK_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    @classmethod
+    def poll(cls, context):
+        return character_for(nirik_armature(context)) is not None
+
+    def draw(self, context):
+        arm = nirik_armature(context)
+        layout = self.layout
+        layout.template_list("NIRIK_UL_layers", "", arm.pose, "bones", arm, "nirik_layer_index", rows=12)
+        row = layout.row(align=True)
+        row.operator("nirik.hide", text="Hide Selected", icon="HIDE_ON").action = "HIDE"
+        row.operator("nirik.hide", text="Show All", icon="HIDE_OFF").action = "SHOW_ALL"
+
+
 class NIRIK_OT_rebuild(bpy.types.Operator):
     """Re-sync the rig's hidden channels with the visible construction and
     drawing keys (after moving or deleting them in the Dope Sheet)"""
@@ -432,12 +515,13 @@ class NIRIK_PT_more(bpy.types.Panel):
 
 
 classes = (NIRIK_OT_load_character, NIRIK_OT_step_construction, NIRIK_OT_select_part, NIRIK_OT_pick,
-           NIRIK_OT_step_drawing, NIRIK_OT_layer, NIRIK_OT_set_side, NIRIK_OT_rebuild,
-           NIRIK_PT_main, NIRIK_PT_more)
+           NIRIK_OT_step_drawing, NIRIK_OT_layer, NIRIK_OT_set_side, NIRIK_OT_hide, NIRIK_OT_rebuild,
+           NIRIK_UL_layers, NIRIK_PT_main, NIRIK_PT_layers, NIRIK_PT_more)
 _keymaps = []
 
 
 def register():
+    bpy.types.Object.nirik_layer_index = IntProperty(default=-1, update=_layer_index_changed)
     for cls in classes:
         bpy.utils.register_class(cls)
     sync.register()
@@ -468,3 +552,4 @@ def unregister():
     _keymaps.clear()
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
+    del bpy.types.Object.nirik_layer_index

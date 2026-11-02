@@ -59,6 +59,15 @@ In the Nirik tab, for the selected part (and everything it carries):
   the character's far-limb darkening (learned from her stock poses); *Near*
   removes it. Use *Far* when you move a limb behind the body.
 
+## Layers list and hiding
+
+*Nirik tab → Layers* lists the parts showing a drawing, front first, in their
+current order (Forward/Back moves rows). Click a row to select the part; the
+eye hides it **in the viewport only**, so renders never lose it. Hidden parts
+can't be clicked, which is the point: hide the blink, pose the eye under it,
+show it again. *Hide Selected* (also the eye button next to Auto/Near/Far)
+and *Show All* work on whole selections.
+
 ## Posing
 
 With a part selected, use Blender as usual: `G` move, `R` rotate, `S` scale.
