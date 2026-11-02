@@ -505,7 +505,8 @@ class NIRIK_OT_browse_drawings(bpy.types.Operator):
     bl_idname = "nirik.browse_drawings"
     bl_label = "Drawings"
 
-    show_all: BoolProperty(name="All", description="Every drawing this part can show, not just the current set")
+    show_all: BoolProperty(name="All", default=True,
+                           description="Every drawing this part can show, not just the current set")
 
     @classmethod
     def poll(cls, context):
@@ -524,8 +525,11 @@ class NIRIK_OT_browse_drawings(bpy.types.Operator):
         slot = active_slot(context, char)
         current = arm.pose.bones[slot]["nirik_drawing"]
         options = char.slot_drawings(slot)
-        if not self.show_all and current in char.drawings:
-            options = [d for d in options if char.drawings[d].symbol == char.drawings[current].symbol]
+        symbol = char.drawings[current].symbol if current in char.drawings else None
+        if not self.show_all and symbol:
+            options = [d for d in options if char.drawings[d].symbol == symbol]
+        # Current set first, then the other sets grouped together.
+        options.sort(key=lambda d: (char.drawings[d].symbol != symbol, char.drawings[d].symbol, d))
         layout = self.layout
         row = layout.row()
         row.label(text=f"{part_label(arm, char, slot)}: {len(options)} drawings")
