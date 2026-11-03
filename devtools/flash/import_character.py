@@ -25,6 +25,7 @@ import argparse
 import hashlib
 import json
 import math
+import re
 import sys
 import io
 import time
@@ -124,8 +125,23 @@ def short(name: str) -> str:
     return name.rsplit("/", 1)[-1]
 
 
-def is_rig(name: str | None) -> bool:
-    return bool(name) and short(name).startswith("~")
+def is_rig(name: str | None, ev: E.Evaluator | None = None) -> bool:
+    """Rig symbols start with "~". With `ev`, a wrapper that directly holds a rig
+    (a walk cycle's "PTS_walk_head" around "~PTS_Head") counts too, so the head
+    inside stays editable instead of being flattened."""
+    if not name:
+        return False
+    if short(name).startswith("~"):
+        return True
+    if ev is None:
+        return False
+    cache = ev.__dict__.setdefault("_wraps_rig", {})
+    if name not in cache:
+        idx = ev.index(name)
+        cache[name] = bool(idx) and any(
+            short(el.get("libraryItemName") or "").startswith("~")
+            for L in idx.layers for sp in L.spans for el in sp.elements)
+    return cache[name]
 
 
 def rig_name(symbol: str) -> str:
@@ -173,7 +189,7 @@ def discover(ev: E.Evaluator, root: str):
                     name = el.get("libraryItemName")
                     if el.tag != E.TAG_INSTANCE or not name:
                         continue
-                    if is_rig(name):
+                    if is_rig(name, ev):
                         slot.child_rig = name
                         pending.append(name)
                     else:
@@ -196,12 +212,13 @@ def color_list(c: E.ColorXf) -> list[float] | None:
     return None if c.is_identity else [round(v, 6) for v in (*c.mult, *c.off)]
 
 
-def constructions(ev: E.Evaluator, sym: str, slots: list[Slot], drawing_of, construction_of):
-    """Distinct frames of a rig -> construction records, plus frame -> construction index."""
+def constructions(ev: E.Evaluator, sym: str, slots: list[Slot], drawing_of, construction_of,
+                  frames: range | None = None):
+    """Distinct frames of a rig -> construction records, plus {frame: construction}."""
     idx = ev.index(sym)
     by_layer = {s.layer_index: s for s in slots}
-    records, frame_map, keys = [], [], {}
-    for f in range(idx.frame_count):
+    records, frame_map, keys = [], {}, {}
+    for f in frames if frames is not None else range(idx.frame_count):
         entries = {}
         for L in idx.layers:
             slot = by_layer.get(L.i)
@@ -220,7 +237,7 @@ def constructions(ev: E.Evaluator, sym: str, slots: list[Slot], drawing_of, cons
             entry = {"matrix": matrix_list(E.read_matrix(el))}
             if color_list(color):
                 entry["color"] = color_list(color)
-            if is_rig(name):
+            if is_rig(name, ev):
                 entry["construction"] = construction_of(name, cf)
             else:
                 entry["drawing"] = drawing_of(slot.name, name, cf)
@@ -231,8 +248,39 @@ def constructions(ev: E.Evaluator, sym: str, slots: list[Slot], drawing_of, cons
             records.append({"id": len(records), "frames": [], "labels": frame_labels(idx, f),
                             "slots": entries})
         records[keys[key]]["frames"].append(f)
-        frame_map.append(keys[key])
+        frame_map[f] = keys[key]
     return records, frame_map
+
+
+def cycle_speed(ev: E.Evaluator, root: str, frames: range) -> float | None:
+    """Walking speed of an in-place cycle, in character units per frame
+    (negative = toward screen left): a planted hoof slides backward at exactly
+    the speed the body must travel for the hooves to stay put."""
+    lowest: dict[str, list] = {}
+    for i, f in enumerate(frames):
+        for n in ev.evaluate(f, root=root):
+            if n.kind != "shape":
+                continue
+            p, leg = n, None
+            while p is not None and leg is None:
+                if p.symbol and re.search(r"leg|hoof", short(p.symbol), re.I):
+                    leg = p.symbol
+                p = p.parent
+            if leg is None:
+                continue
+            seq = lowest.setdefault(leg, [None] * len(frames))
+            for x, y in shape_points(n.element, n.in_group):
+                wx, wy = E.apply(n.matrix, x, y)
+                if seq[i] is None or wy > seq[i][1]:
+                    seq[i] = (wx, wy)
+    points = [v for seq in lowest.values() for v in seq if v]
+    if not points:
+        return None
+    ground = max(y for _, y in points)
+    slides = sorted(b[0] - a[0] for seq in lowest.values()
+                    for a, b in zip(seq, seq[1:] + seq[:1])
+                    if a and b and a[1] > ground - 4 and b[1] > ground - 4)
+    return -slides[len(slides) // 2] if slides else None
 
 
 # ── rendering workers ───────────────────────────────────────────────────────
@@ -281,7 +329,9 @@ def _render_job(job):
 
 # ── main ────────────────────────────────────────────────────────────────────
 
-def import_character(path: Path, root: str, name: str, out: Path, ppu: float, jobs: int):
+def import_character(path: Path, root: str, name: str, out: Path, ppu: float, jobs: int,
+                     frames: range | None = None):
+    """`frames` limits the root rig to those frames: a walk cycle's loop."""
     t0 = time.time()
     doc = fla.load(path)
     ev = E.Evaluator(doc)
@@ -330,13 +380,14 @@ def import_character(path: Path, root: str, name: str, out: Path, ppu: float, jo
 
     def construction_of(sym: str, frame: int) -> int:
         _, frame_map = rig_constructions[sym]
-        return frame_map[min(frame, len(frame_map) - 1)]
+        return frame_map.get(frame, frame_map[max(frame_map)])
 
     def drawing_of(slot: str, symbol: str, frame: int) -> int:
         return frame_drawing.get((slot, symbol, frame), 0)
 
     for sym in reversed(list(rigs)):
-        rig_constructions[sym] = constructions(ev, sym, rigs[sym], drawing_of, construction_of)
+        rig_constructions[sym] = constructions(ev, sym, rigs[sym], drawing_of, construction_of,
+                                               frames if sym == root else None)
 
     # Canvases: union bounds, padded, snapped to whole pixels.
     for slot in slots_by_name.values():
@@ -368,6 +419,7 @@ def import_character(path: Path, root: str, name: str, out: Path, ppu: float, jo
         "source": {"file": path.name, "root": short(root)},
         "ppu": ppu,
         "root_rig": rig_name(root),
+        **({"cycle": {"frames": len(frames), "speed": cycle_speed(ev, root, frames)}} if frames else {}),
         "rigs": {
             rig_name(sym): {
                 "symbol": short(sym),
@@ -400,9 +452,14 @@ def main(argv=None):
     ap.add_argument("--name", required=True)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--ppu", type=float, default=4.0, help="raster pixels per Flash pixel")
+    ap.add_argument("--frames", help="root frames to keep, e.g. 0-23 for a walk cycle's loop")
     ap.add_argument("--jobs", type=int, default=6)
     args = ap.parse_args(argv)
-    import_character(args.fla, args.root, args.name, args.out, args.ppu, args.jobs)
+    frames = None
+    if args.frames:
+        a, b = (int(v) for v in args.frames.split("-"))
+        frames = range(a, b + 1)
+    import_character(args.fla, args.root, args.name, args.out, args.ppu, args.jobs, frames)
 
 
 if __name__ == "__main__":

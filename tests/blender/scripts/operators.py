@@ -434,6 +434,27 @@ def test_depth_pushes_carried_parts_behind_and_extend_selects():
     assert ys() == before
 
 
+def test_add_cycle_loops_body_and_slides_root():
+    from nirik.ui import character_for
+    arm = state["arm"]
+    char = character_for(arm)
+    arm.animation_data_clear()
+    char.cycle = {"frames": 4, "speed": -6.0}  # pretend the stock rig loops its first 4 poses
+    try:
+        bpy.ops.object.mode_set(mode="POSE")
+        assert bpy.ops.nirik.add_cycle(start=1, end=12) == {"FINISHED"}
+        fcs = {(fc.data_path, fc.array_index): fc for fc in _fcurves(arm)}
+        cons = fcs[('pose.bones["ROOT"]["nirik_construction"]', 0)]
+        assert [round(cons.evaluate(f)) for f in (1, 2, 5, 9, 12)] == [0, 1, 0, 0, 3]
+        x = fcs[('pose.bones["ROOT"].location', 0)]
+        assert all(kp.interpolation == "LINEAR" for kp in x.keyframe_points)
+        assert abs(x.evaluate(12) - x.evaluate(1) - (-6.0 * 11 / arm["nirik_units_per_meter"])) < 1e-6
+        head = 'pose.bones["Character.=HEADCOMP="]["nirik_construction"]'
+        assert (head, 0) not in fcs  # the head keeps its own acting
+    finally:
+        char.cycle = None
+
+
 def test_swapped_drawing_renders():
     # Two different mouths must render differently: the new tile is live.
     arm = state["arm"]

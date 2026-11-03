@@ -494,7 +494,8 @@ def _apply_sockets(arm, char: L.Character, rig: str, construction: int, frame: i
             skew.keyframe_insert("rotation_euler", frame=frame)
 
 
-def apply_construction(arm, char: L.Character, rig: str, construction: int, frame: int | None = None):
+def apply_construction(arm, char: L.Character, rig: str, construction: int, frame: int | None = None,
+                       children: bool = True):
     """Pose a library construction: sockets, the stock drawings, and the child
     rigs' paired constructions. With `frame`, everything is keyed there."""
     control = arm.pose.bones[construction_bone(char, rig)]
@@ -506,7 +507,7 @@ def apply_construction(arm, char: L.Character, rig: str, construction: int, fram
     for s in char.rigs[rig].slots:
         entry = cons.slots.get(s.name)
         if s.child_rig:
-            if entry is not None and entry.construction is not None:
+            if children and entry is not None and entry.construction is not None:
                 apply_construction(arm, char, s.child_rig, entry.construction, frame)
             continue
         set_drawing(arm, char, s.name, entry.drawing if entry else 0)
@@ -662,4 +663,29 @@ def move_depth(arm, char: L.Character, bones: list[str], how: str, frame: int | 
             pb.keyframe_insert('["nirik_depth"]', frame=frame)
     if frame is not None:
         make_constant(arm)
+    arm.update_tag()
+
+
+# ── cycles ───────────────────────────────────────────────────────────────────
+
+def add_cycle(arm, char: L.Character, start: int, end: int, phase: int = 0):
+    """Key the root rig's loop on every frame of [start, end] and slide the
+    body at the cycle's speed (linear keys, so planted hooves stay put). Child
+    rigs (the head) are left alone: acting stays the animator's."""
+    n = char.cycle["frames"]
+    for f in range(start, end + 1):
+        apply_construction(arm, char, char.root_rig, (f - start + phase) % n, frame=f, children=False)
+    speed = (char.cycle.get("speed") or 0.0) / arm["nirik_units_per_meter"]
+    root = arm.pose.bones["ROOT"]
+    x0 = root.location.x
+    for f, x in ((start, x0), (end, x0 + speed * (end - start))):
+        root.location.x = x
+        root.keyframe_insert("location", index=0, frame=f)
+    root.location.x = x0
+    bag = _channelbag(arm)
+    for fc in bag.fcurves:
+        if fc.data_path == 'pose.bones["ROOT"].location' and fc.array_index == 0:
+            for kp in fc.keyframe_points:
+                if start <= kp.co.x <= end:
+                    kp.interpolation = "LINEAR"
     arm.update_tag()

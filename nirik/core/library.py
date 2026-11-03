@@ -71,6 +71,7 @@ class Character:
     root_rig: str
     rigs: dict[str, Rig]
     drawings: dict[int, Drawing]
+    cycle: dict | None = None  # {"frames": n, "speed": units/frame}: root rig loops in place
 
     def drawing_path(self, drawing: int) -> Path:
         return self.root / "drawings" / f"{drawing}.png"
@@ -134,7 +135,8 @@ def load(root: str | Path) -> Character:
         rigs[rname] = Rig(rname, sorted(slots, key=lambda s: s.order), cons)
     drawings = {int(k): Drawing(int(k), d["slot"], d["symbol"], d.get("tags", []))
                 for k, d in data["drawings"].items()}
-    return Character(root, data["name"], data["ppu"], data["root_rig"], rigs, drawings)
+    return Character(root, data["name"], data["ppu"], data["root_rig"], rigs, drawings,
+                     data.get("cycle"))
 
 
 # ── space conversion ─────────────────────────────────────────────────────────

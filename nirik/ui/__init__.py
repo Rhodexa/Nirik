@@ -115,6 +115,40 @@ class NIRIK_OT_step_construction(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class NIRIK_OT_add_cycle(bpy.types.Operator):
+    """Loop the character's cycle (e.g. a walk) over a frame range and slide
+    the body at the cycle's speed, so hooves stay planted. The head is left
+    alone for acting"""
+    bl_idname = "nirik.add_cycle"
+    bl_label = "Add Cycle"
+    bl_options = {"REGISTER", "UNDO"}
+
+    start: IntProperty(name="From Frame")
+    end: IntProperty(name="To Frame")
+    phase: IntProperty(name="Start at Cycle Frame", min=0, description="Which frame of the loop the range starts on")
+
+    @classmethod
+    def poll(cls, context):
+        char = character_for(nirik_armature(context))
+        return char is not None and char.cycle is not None
+
+    def invoke(self, context, event):
+        self.start = context.scene.frame_current
+        self.end = self.start + 2 * character_for(nirik_armature(context)).cycle["frames"] - 1
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        if self.end <= self.start:
+            self.report({"ERROR"}, "To Frame must be after From Frame")
+            return {"CANCELLED"}
+        arm = nirik_armature(context)
+        rig_build.add_cycle(arm, character_for(arm), self.start, self.end, self.phase)
+        sync.mark_synced(arm)
+        context.scene.frame_set(context.scene.frame_current)
+        redraw_viewports(context)
+        return {"FINISHED"}
+
+
 class NIRIK_OT_select_part(bpy.types.Operator):
     """Select this part's controls (Pose mode)"""
     bl_idname = "nirik.select_part"
@@ -277,6 +311,10 @@ class NIRIK_PT_main(bpy.types.Panel):
             labels = ", ".join(rig.constructions[cid].labels)
             if labels:
                 box.label(text=f"   {labels}  ({len(rig.constructions)} poses)")
+        if char.cycle:
+            speed = (char.cycle.get("speed") or 0) * 24 / arm["nirik_units_per_meter"]
+            box.operator("nirik.add_cycle", text=f"Add Cycle ({char.cycle['frames']} frames, "
+                                                  f"{abs(speed):.2f} m/s)", icon="FORCE_HARMONIC")
         row = box.row(align=True)
         row.operator("screen.keyframe_jump", text="Prev Key", icon="PREV_KEYFRAME").next = False
         row.operator("screen.keyframe_jump", text="Next Key", icon="NEXT_KEYFRAME").next = True
@@ -634,7 +672,7 @@ class NIRIK_PT_more(bpy.types.Panel):
                 op.bones = name
 
 
-classes = (NIRIK_OT_load_character, NIRIK_OT_step_construction, NIRIK_OT_select_part, NIRIK_OT_pick,
+classes = (NIRIK_OT_load_character, NIRIK_OT_step_construction, NIRIK_OT_add_cycle, NIRIK_OT_select_part, NIRIK_OT_pick,
            NIRIK_OT_step_drawing, NIRIK_OT_set_drawing, NIRIK_OT_browse_drawings, NIRIK_OT_layer, NIRIK_OT_depth, NIRIK_OT_set_side, NIRIK_OT_hide, NIRIK_OT_rebuild,
            NIRIK_UL_layers, NIRIK_PT_main, NIRIK_PT_layers, NIRIK_PT_more)
 _keymaps = []
