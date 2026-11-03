@@ -457,7 +457,8 @@ def main(argv=None):
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--ppu", type=float, default=4.0, help="raster pixels per Flash pixel")
     ap.add_argument("--frames", help="root frames to keep, e.g. 0-23 for a walk cycle's loop")
-    ap.add_argument("--jobs", type=int, default=6)
+    ap.add_argument("--jobs", type=int, default=2,
+                    help="parallel renderers; each loads the whole .fla (~0.5-1.5 GB)")
     args = ap.parse_args(argv)
     frames = None
     if args.frames:
