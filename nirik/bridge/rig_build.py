@@ -668,14 +668,14 @@ def move_depth(arm, char: L.Character, bones: list[str], how: str, frame: int | 
 
 # ── cycles ───────────────────────────────────────────────────────────────────
 
-def add_cycle(arm, char: L.Character, start: int, end: int, phase: int = 0):
+def add_cycle(arm, char: L.Character, start: int, end: int, phase: int = 0, speed_scale: float = 1.0):
     """Key the root rig's loop on every frame of [start, end] and slide the
     body at the cycle's speed (linear keys, so planted hooves stay put). Child
     rigs (the head) are left alone: acting stays the animator's."""
     n = char.cycle["frames"]
     for f in range(start, end + 1):
         apply_construction(arm, char, char.root_rig, (f - start + phase) % n, frame=f, children=False)
-    speed = (char.cycle.get("speed") or 0.0) / arm["nirik_units_per_meter"]
+    speed = speed_scale * (char.cycle.get("speed") or 0.0) / arm["nirik_units_per_meter"]
     root = arm.pose.bones["ROOT"]
     x0 = root.location.x
     for f, x in ((start, x0), (end, x0 + speed * (end - start))):

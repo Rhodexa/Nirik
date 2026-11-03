@@ -126,6 +126,8 @@ class NIRIK_OT_add_cycle(bpy.types.Operator):
     start: IntProperty(name="From Frame")
     end: IntProperty(name="To Frame")
     phase: IntProperty(name="Start at Cycle Frame", min=0, description="Which frame of the loop the range starts on")
+    speed: bpy.props.FloatProperty(name="Speed", default=100.0, min=0.0, soft_max=200.0, subtype="PERCENTAGE",
+                                   description="Adjust if the feet slide: 100% is the speed measured from the cycle")
 
     @classmethod
     def poll(cls, context):
@@ -142,7 +144,7 @@ class NIRIK_OT_add_cycle(bpy.types.Operator):
             self.report({"ERROR"}, "To Frame must be after From Frame")
             return {"CANCELLED"}
         arm = nirik_armature(context)
-        rig_build.add_cycle(arm, character_for(arm), self.start, self.end, self.phase)
+        rig_build.add_cycle(arm, character_for(arm), self.start, self.end, self.phase, self.speed / 100)
         sync.mark_synced(arm)
         context.scene.frame_set(context.scene.frame_current)
         redraw_viewports(context)

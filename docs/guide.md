@@ -115,6 +115,24 @@ Children follow their parent (the head carries eyes, mouth, mane). `Alt+G`,
 Typical order: block poses with constructions (body, head angle), set
 expressions with Mouth/Brow/Blink swaps, then refine with transforms.
 
+## Walk cycles
+
+Walks are their own libraries (`library/twilight_walk_side`,
+`library/spike_walk_side`): the show's cycle rigs, where every body part loops
+in place and the head is the regular head rig. Load one, then *Add Cycle* in
+the Nirik tab: pick the frame range and it keys the loop on every frame and
+slides Body at the walk's speed, measured from the cycle so the feet stay
+planted (*Speed %* corrects any sliding). The head isn't touched: swap
+mouths, blink and turn it on top as usual. Both side walks face left.
+
+Import another walk from a scene file:
+
+```
+.venv/bin/python -m devtools.flash.import_character SCENE.fla \
+    --root "~RY_Pwalk_Character_side_WALK" --name rarity_walk_side --frames 0-23 --jobs 2 \
+    --out library/rarity_walk_side
+```
+
 ## Rendering
 
 The character is a flat drawing with its layers kept in order from any camera

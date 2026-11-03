@@ -263,7 +263,7 @@ def cycle_speed(ev: E.Evaluator, root: str, frames: range) -> float | None:
                 continue
             p, leg = n, None
             while p is not None and leg is None:
-                if p.symbol and re.search(r"leg|hoof", short(p.symbol), re.I):
+                if p.symbol and re.search(r"leg|hoof|foot", short(p.symbol), re.I):
                     leg = p.symbol
                 p = p.parent
             if leg is None:
@@ -273,13 +273,17 @@ def cycle_speed(ev: E.Evaluator, root: str, frames: range) -> float | None:
                 wx, wy = E.apply(n.matrix, x, y)
                 if seq[i] is None or wy > seq[i][1]:
                     seq[i] = (wx, wy)
-    points = [v for seq in lowest.values() for v in seq if v]
-    if not points:
-        return None
-    ground = max(y for _, y in points)
-    slides = sorted(b[0] - a[0] for seq in lowest.values()
-                    for a, b in zip(seq, seq[1:] + seq[:1])
-                    if a and b and a[1] > ground - 4 and b[1] > ground - 4)
+    slides = []
+    for seq in lowest.values():
+        ys = sorted(v[1] for v in seq if v)
+        if not ys:
+            continue
+        ground = ys[int(0.75 * (len(ys) - 1))]  # this foot's usual low point; ignores a dipping toe
+        for a, b in zip(seq, seq[1:] + seq[:1]):
+            # planted: down on the ground and not lifting or landing
+            if a and b and min(a[1], b[1]) > ground - 2.5 and abs(b[1] - a[1]) < 1.5:
+                slides.append(b[0] - a[0])
+    slides.sort()
     return -slides[len(slides) // 2] if slides else None
 
 
