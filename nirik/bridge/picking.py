@@ -79,7 +79,7 @@ def _mask_alpha(arm, char: L.Character, mask_slot: str, point: Vector, depsgraph
     empty = bpy.data.objects.get(f"nirik:{char.name}:{mask_slot}")
     drawing = arm.pose.bones[mask_slot]["nirik_drawing"]
     if empty is None or not drawing:
-        return 0.0
+        return 1.0  # an empty mask layer masks nothing
     local = empty.evaluated_get(depsgraph).matrix_world.inverted() @ point
     return alpha_at(char, drawing, local.x, local.y)
 

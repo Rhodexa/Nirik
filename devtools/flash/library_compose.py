@@ -84,10 +84,8 @@ def compose_svg(lib: Library, rig: str, construction: int, world: E.Mat, width: 
             if not c.is_identity:
                 el = f'<g filter="url(#{color_filter(c)})">{el}</g>'
             mask_name = slot.get("masked_by")
-            if mask_name:
-                mask_entry = cons.get(mask_name)
-                if mask_entry is None or not mask_entry.get("drawing"):
-                    continue  # nothing shows through an empty mask
+            mask_entry = cons.get(mask_name) if mask_name else None
+            if mask_entry is not None and mask_entry.get("drawing"):  # empty masks mask nothing
                 mid = f"m{len(defs)}"
                 mask_img = lib.image(by_name[mask_name], mask_entry["drawing"],
                                      E.mat_mul(world, mask_entry["matrix"]))

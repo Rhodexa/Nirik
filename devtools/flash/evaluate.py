@@ -311,8 +311,10 @@ class Evaluator:
                 mask_nodes: list[Node] = []
                 self._walk_layer(idx, L, frame, world, color, (), parent, depth, mask_nodes, stack)
                 clip = MaskClip([n for n in mask_nodes if n.kind == "shape"])
+                # Flash: a mask layer with nothing on this frame masks nothing.
+                inner = masks + (clip,) if clip.nodes else masks
                 for mi in reversed(idx.masked.get(L.i, [])):
-                    self._walk_layer(idx, idx.layers[mi], frame, world, color, masks + (clip,),
+                    self._walk_layer(idx, idx.layers[mi], frame, world, color, inner,
                                      parent, depth, out, stack)
             else:
                 self._walk_layer(idx, L, frame, world, color, masks, parent, depth, out, stack)

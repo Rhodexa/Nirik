@@ -234,18 +234,22 @@ def build_material(char: L.Character, slot: L.Slot, image, mask_image=None, mask
         mtex.extension = "CLIP"
         links.new(_tile_uv(nodes, links, coords.outputs["Object"], mask_tile.outputs["Fac"],
                            canvas_pixels(char, mask_slot)), mtex.inputs["Vector"])
-        mask_visible = _math(nodes, links, "GREATER_THAN", mask_tile.outputs["Fac"], value=-0.5)
-        # Outside the mask canvas the lookup would land on a neighboring tile
-        # (another drawing): treat it as fully masked instead.
+        # Flash: an empty mask layer masks nothing. With a mask drawing, the
+        # factor is its alpha, and zero outside its canvas, where the lookup
+        # would land on a neighboring tile (another drawing).
+        has_mask = _math(nodes, links, "GREATER_THAN", mask_tile.outputs["Fac"], value=-0.5)
+        masked = mtex.outputs["Alpha"]
         split = nodes.new("ShaderNodeSeparateXYZ")
         links.new(coords.outputs["Object"], split.inputs[0])
         for axis in (0, 1):
             c = split.outputs[axis]
             inside = _math(nodes, links, "MULTIPLY", _math(nodes, links, "GREATER_THAN", c, value=0.0),
                            _math(nodes, links, "LESS_THAN", c, value=1.0))
-            mask_visible = _math(nodes, links, "MULTIPLY", mask_visible, inside)
-        alpha = _math(nodes, links, "MULTIPLY", alpha, _math(nodes, links, "MULTIPLY",
-                                                             mtex.outputs["Alpha"], mask_visible))
+            masked = _math(nodes, links, "MULTIPLY", masked, inside)
+        factor = _math(nodes, links, "ADD", _math(nodes, links, "MULTIPLY", has_mask, masked),
+                       _math(nodes, links, "SUBTRACT", _math(nodes, links, "MULTIPLY", has_mask, value=-1.0),
+                             value=-1.0))  # has * masked + (1 - has)
+        alpha = _math(nodes, links, "MULTIPLY", alpha, factor)
     alpha = _math(nodes, links, "MINIMUM", _math(nodes, links, "MAXIMUM", alpha, value=0.0), value=1.0)
     # Texture filtering leaves near-zero alpha around card edges; drop it.
     alpha = _math(nodes, links, "MULTIPLY", alpha, _math(nodes, links, "GREATER_THAN", alpha, value=1 / 255))

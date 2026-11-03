@@ -159,3 +159,12 @@ def test_mask_layer_clips_masked_layers_only():
 def test_guide_layers_are_skipped():
     layers = layer(frame(0, 1, SQUARE), "g", 'layerType="guide"') + layer(frame(0, 1, SQUARE), "n")
     assert [n.layer for n in nodes_at(doc(layers), 0, "shape")] == ["n"]
+
+
+def test_empty_mask_layer_masks_nothing():
+    # Flash shows layers under a mask layer that has nothing on the frame
+    # (Spike's walk head keeps his skull under an empty "PUPIL" mask).
+    layers = (layer(frame(0, 1, ""), "mask", 'layerType="mask"')
+              + layer(frame(0, 1, SQUARE), "masked", 'parentLayerIndex="0"'))
+    shapes = nodes_at(doc(layers), 0, "shape")
+    assert len(shapes) == 1 and shapes[0].masks == ()
