@@ -13,8 +13,9 @@ import numpy as np
 
 import harness
 
-project, stage = sys.argv[sys.argv.index("--") + 1:]
-project = Path(project)
+args = sys.argv[sys.argv.index("--") + 1:]
+project, stage = Path(args[0]), args[1]
+expected = Path(args[2]) if len(args) > 2 else project / "library" / "twilight"
 harness.load_nirik()
 
 if stage == "build":
@@ -25,7 +26,7 @@ if stage == "build":
 else:
     bpy.ops.wm.open_mainfile(filepath=str(project / "Blends" / "scene.blend"))
     arm = next(o for o in bpy.data.objects if "nirik_library" in o)
-    assert arm["nirik_library"] == str((project / "library" / "twilight").resolve()), arm["nirik_library"]
+    assert arm["nirik_library"] == str(expected.resolve()), arm["nirik_library"]
     scene = bpy.context.scene
     scene.render.engine = "BLENDER_EEVEE"
     scene.render.resolution_x = scene.render.resolution_y = 128

@@ -1,8 +1,8 @@
 """Repair puppets whose library moved (project folder renamed, files copied).
 
 Runs when a .blend is opened: a character whose stored library path is gone
-is re-pointed to the nearest `library/<name>` found next to the .blend or in
-its parent folders, and every palette's tile links are rebuilt, since they
+is re-pointed to the nearest `library/<name>` found next to the .blend, in
+its parent folders or their sibling projects, or in the add-on's own project, and every palette's tile links are rebuilt, since they
 point into the library.
 """
 
@@ -25,15 +25,21 @@ def find_library(old_path: str, blend_path: str) -> Path | None:
     old = Path(old_path)
     if (old / "character.json").exists():
         return old
-    if not blend_path:
-        return None
     tail = Path(*old.parts[-2:])  # e.g. library/twilight
-    folder = Path(blend_path).resolve().parent
-    for _ in range(SEARCH_LEVELS):
+    folders = []
+    if blend_path:
+        folder = Path(blend_path).resolve().parent
+        for _ in range(SEARCH_LEVELS):
+            # the folder itself, then sibling projects (Studio/<project>/library/...)
+            folders.append(folder)
+            folders += sorted(p for p in folder.iterdir() if p.is_dir()) if folder.is_dir() else []
+            folder = folder.parent
+    # the add-on's own project (dev setup: <project>/nirik is the extension)
+    folders.append(Path(__file__).resolve().parents[2])
+    for folder in folders:
         for candidate in (folder / tail, folder / old.name):
             if (candidate / "character.json").exists():
                 return candidate
-        folder = folder.parent
     return None
 
 
