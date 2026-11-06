@@ -1,8 +1,10 @@
+from pathlib import Path
+
 import bpy
 from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
 from bpy_extras import view3d_utils
 
-from ..bridge import picking, relink, rig_build, sync
+from ..bridge import picking, props, relink, rig_build, sync
 from ..core import controls, library
 from . import overlay
 
@@ -78,16 +80,85 @@ class NIRIK_OT_load_character(bpy.types.Operator):
         except (OSError, ValueError) as e:
             self.report({"ERROR"}, f"Not a Nirik library: {e}")
             return {"CANCELLED"}
-        _characters[str(char.root)] = char
-        if context.mode != "OBJECT":
-            bpy.ops.object.mode_set(mode="OBJECT")
-        arm = rig_build.build(char)
-        rig_build.apply_construction(arm, char, char.root_rig, 0)
-        sync.mark_synced(arm)
-        for ob in context.selected_objects:
-            ob.select_set(False)
-        arm.select_set(True)
-        context.view_layer.objects.active = arm
+        load_and_select(context, char)
+        return {"FINISHED"}
+
+
+def library_home(context) -> Path:
+    """Where new libraries go: library/ next to the saved .blend, else the
+    add-on's own project library (dev setup)."""
+    if bpy.data.filepath:
+        return Path(bpy.data.filepath).parent / "library"
+    return Path(__file__).resolve().parents[2] / "library"
+
+
+def load_and_select(context, char):
+    _characters[str(char.root)] = char
+    if context.mode != "OBJECT":
+        bpy.ops.object.mode_set(mode="OBJECT")
+    arm = rig_build.build(char)
+    rig_build.apply_construction(arm, char, char.root_rig, 0)
+    sync.mark_synced(arm)
+    for ob in context.selected_objects:
+        ob.select_set(False)
+    arm.select_set(True)
+    context.view_layer.objects.active = arm
+    return arm
+
+
+class NIRIK_OT_import_prop(bpy.types.Operator):
+    """Turn an image (or a sprite sheet of separate pieces) into a prop"""
+    bl_idname = "nirik.import_prop"
+    bl_label = "Import Prop"
+    bl_options = {"REGISTER", "UNDO"}
+
+    filepath: StringProperty(subtype="FILE_PATH")
+    filter_image: BoolProperty(default=True, options={"HIDDEN"})
+    name: StringProperty(name="Name", description="Library name (default: the image's name)")
+    height: bpy.props.FloatProperty(name="Height", default=1.0, min=0.01, unit="LENGTH",
+                                    description="Height of the tallest piece")
+    split: BoolProperty(name="Split Sheet", default=True,
+                        description="Separate pieces of art become separate drawings")
+    pivot: EnumProperty(name="Pivot", items=(
+        ("AUTO", "Auto", "Bottom for a single picture, center for sheets"),
+        ("BOTTOM", "Bottom", "Stands on the ground"), ("CENTER", "Center", "Turns around its middle")))
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
+
+    def execute(self, context):
+        image = Path(self.filepath)
+        name = bpy.path.clean_name(self.name or image.stem).lower()
+        out = library_home(context) / name
+        if (out / "character.json").exists():
+            self.report({"ERROR"}, f"{out} already exists; pick another name")
+            return {"CANCELLED"}
+        try:
+            props.import_prop(image, name, out, self.height, self.split, self.pivot)
+        except (OSError, RuntimeError, ValueError) as e:
+            self.report({"ERROR"}, str(e))
+            return {"CANCELLED"}
+        char = library.load(out)
+        load_and_select(context, char)
+        self.report({"INFO"}, f"{name}: {len(char.drawings)} drawing(s) in {out}")
+        return {"FINISHED"}
+
+
+class NIRIK_OT_face_camera(bpy.types.Operator):
+    """Keep this character or prop turned toward the scene camera (its
+    constraint's Influence is keyable, e.g. to reveal it's flat)"""
+    bl_idname = "nirik.face_camera"
+    bl_label = "Face Camera"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return nirik_armature(context) is not None and context.scene.camera is not None
+
+    def execute(self, context):
+        arm = nirik_armature(context)
+        props.face_camera(arm, props.FACE_CAMERA not in arm.constraints)
         return {"FINISHED"}
 
 
@@ -280,7 +351,9 @@ class NIRIK_PT_main(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
-        layout.operator("nirik.load_character", icon="FILE_FOLDER")
+        row = layout.row(align=True)
+        row.operator("nirik.load_character", icon="FILE_FOLDER")
+        row.operator("nirik.import_prop", icon="IMAGE_DATA")
         arm = nirik_armature(context)
         char = character_for(arm)
         if char is None:
@@ -296,7 +369,10 @@ class NIRIK_PT_main(bpy.types.Panel):
             op.bones = ",".join(bones)
 
         box = layout.box()
-        box.label(text=f"{char.name}", icon="ARMATURE_DATA")
+        row = box.row()
+        row.label(text=f"{char.name}", icon="ARMATURE_DATA")
+        row.operator("nirik.face_camera", text="Face Camera", icon="CON_LOCKTRACK",
+                     depress=props.FACE_CAMERA in arm.constraints)
         for rig in char.rigs.values():
             control = arm.pose.bones[rig_build.construction_bone(char, rig.name)]
             cid = control.get("nirik_construction", 0)
@@ -375,7 +451,7 @@ class NIRIK_PT_main(bpy.types.Panel):
         if drawing and drawing.tags:
             box.label(text=" · ".join(drawing.tags), icon="BOOKMARKS")
         box.label(text=f"{len(char.slot_drawings(slot))} drawings, "
-                       f"{len(rig_build.palette(arm, slot))} loaded", icon="IMAGE_DATA")
+                       f"{len(rig_build.palette(char, slot))} loaded", icon="IMAGE_DATA")
         box.label(text="Alt+Wheel: swap (same set)", icon="MOUSE_MMB_SCROLL")
         box.label(text="Ctrl+Alt+Wheel: swap (all)", icon="MOUSE_MMB_SCROLL")
 
@@ -674,7 +750,7 @@ class NIRIK_PT_more(bpy.types.Panel):
                 op.bones = name
 
 
-classes = (NIRIK_OT_load_character, NIRIK_OT_step_construction, NIRIK_OT_add_cycle, NIRIK_OT_select_part, NIRIK_OT_pick,
+classes = (NIRIK_OT_load_character, NIRIK_OT_import_prop, NIRIK_OT_face_camera, NIRIK_OT_step_construction, NIRIK_OT_add_cycle, NIRIK_OT_select_part, NIRIK_OT_pick,
            NIRIK_OT_step_drawing, NIRIK_OT_set_drawing, NIRIK_OT_browse_drawings, NIRIK_OT_layer, NIRIK_OT_depth, NIRIK_OT_set_side, NIRIK_OT_hide, NIRIK_OT_rebuild,
            NIRIK_UL_layers, NIRIK_PT_main, NIRIK_PT_layers, NIRIK_PT_more)
 _keymaps = []

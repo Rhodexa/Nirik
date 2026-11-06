@@ -44,19 +44,20 @@ def _select(arm, bone):
 
 
 def test_step_drawing_grows_palette_and_keys():
+    from nirik.ui import character_for
     arm = state["arm"]
     scene = bpy.context.scene
     scene.tool_settings.use_keyframe_insert_auto = True
     scene.frame_set(12)
     _select(arm, "Head.MOUTH")
-    pal_before = len(rig_build.palette(arm, "Head.MOUTH"))
+    pal_before = len(rig_build.palette(character_for(arm), "Head.MOUTH"))
     for _ in range(3):
         assert bpy.ops.nirik.step_drawing(step=1) == {"FINISHED"}
     pb = arm.pose.bones["Head.MOUTH"]
     assert pb["nirik_drawing"] != 0
-    assert len(rig_build.palette(arm, "Head.MOUTH")) > pal_before
+    assert len(rig_build.palette(character_for(arm), "Head.MOUTH")) > pal_before
     image = bpy.data.images[f"nirik:twilight:Head.MOUTH"]
-    assert len(image.tiles) == len(rig_build.palette(arm, "Head.MOUTH"))
+    assert len(image.tiles) == len(rig_build.palette(character_for(arm), "Head.MOUTH"))
     fcurves = [fc for layer in arm.animation_data.action.layers for strip in layer.strips
                for bag in strip.channelbags for fc in bag.fcurves]
     keyed = [fc for fc in fcurves if fc.data_path == 'pose.bones["Head.MOUTH"]["nirik_drawing"]']

@@ -22,6 +22,7 @@ Bone properties are the animation interface; cards follow through drivers:
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -52,34 +53,59 @@ def palette_dir(char: L.Character, slot: str) -> Path:
     return char.root / ".udim" / safe(slot)
 
 
-def palette(arm: bpy.types.Object, slot: str) -> list[int]:
-    return list(arm["nirik_palettes"].get(slot, []))
+PALETTE_FILE = "palette.json"
 
 
-def ensure_in_palette(arm: bpy.types.Object, char: L.Character, slot: str, drawing: int) -> int:
-    """Palette index of `drawing` in `slot`, adding a UDIM tile if needed."""
-    pal = palette(arm, slot)
-    if drawing in pal:
-        return pal.index(drawing)
-    index = len(pal)
-    tile = 1001 + index
+def palette(char: L.Character, slot: str) -> list[int]:
+    """Drawings with a tile in `slot`'s texture, in tile order (tile 1001 first).
+
+    Shared by every puppet and every .blend using this library, and only ever
+    appended to, so tile n means the same drawing everywhere.
+    """
+    path = palette_dir(char, slot) / PALETTE_FILE
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return []
+
+
+def _write_palette(char: L.Character, slot: str, pal: list[int]):
     folder = palette_dir(char, slot)
     folder.mkdir(parents=True, exist_ok=True)
+    tmp = folder / (PALETTE_FILE + ".tmp")
+    tmp.write_text(json.dumps(pal))
+    tmp.replace(folder / PALETTE_FILE)
+
+
+def _link_tile(char: L.Character, slot: str, index: int, drawing: int) -> int:
+    """Point tile 1001+index at the drawing (relative, so moving the project
+    keeps it valid); returns the tile number."""
+    tile = 1001 + index
+    folder = palette_dir(char, slot)
     link = folder / f"t.{tile}.png"
     if link.is_symlink() or link.exists():
         link.unlink()
-    # Relative, so renaming or moving the project folder keeps tiles valid.
     os.symlink(os.path.relpath(char.drawing_path(drawing), folder), link)
-    pal.append(drawing)
-    palettes = arm["nirik_palettes"]
-    palettes[slot] = pal
+    return tile
 
+
+def ensure_in_palette(char: L.Character, slot: str, drawing: int) -> int:
+    """Palette index of `drawing` in `slot`, adding a UDIM tile if needed."""
+    pal = palette(char, slot)
+    if drawing in pal:
+        index = pal.index(drawing)
+        if not (palette_dir(char, slot) / f"t.{1001 + index}.png").exists():
+            _link_tile(char, slot, index, drawing)
+        return index
+    pal.append(drawing)
+    _write_palette(char, slot, pal)
+    tile = _link_tile(char, slot, len(pal) - 1, drawing)
     image = bpy.data.images.get(f"nirik:{char.name}:{slot}")
     if image is not None:
         if not image.tiles.get(tile):
             image.tiles.new(tile_number=tile)
         image.reload()
-    return index
+    return len(pal) - 1
 
 
 def palette_image(char: L.Character, slot: str) -> bpy.types.Image:
@@ -95,8 +121,17 @@ def palette_image(char: L.Character, slot: str) -> bpy.types.Image:
         # Raw sRGB values: color transforms apply in sRGB like Flash's, then
         # the shader converts to linear (see srgb_to_linear_group).
         image.colorspace_settings.name = "Non-Color"
-        image.reload()
+        sync_tiles(image, char, slot)
     return image
+
+
+def sync_tiles(image, char: L.Character, slot: str):
+    """Give the image a tile for every palette entry (other puppets or files
+    may have added some), then reload from disk."""
+    for i in range(len(palette(char, slot))):
+        if not image.tiles.get(1001 + i):
+            image.tiles.new(tile_number=1001 + i)
+    image.reload()
 
 
 # ── materials ────────────────────────────────────────────────────────────────
@@ -313,7 +348,6 @@ def build(char: L.Character, collection=None, units_per_meter: float = UNITS_PER
     coll.objects.link(arm)
     arm["nirik_library"] = str(char.root)
     arm["nirik_units_per_meter"] = units_per_meter
-    arm["nirik_palettes"] = {}
 
     slots = char.all_slots()
     holder = {s.child_rig: s.name for s in slots.values() if s.child_rig}  # rig -> holding slot
@@ -430,10 +464,10 @@ def build(char: L.Character, collection=None, units_per_meter: float = UNITS_PER
 
 def _palette_image_seeded(arm, char, slot: str):
     """Palette image for `slot`; seeds tile 1001 with the slot's first drawing."""
-    if not palette(arm, slot):
+    if not palette(char, slot):
         drawings = char.slot_drawings(slot)
         if drawings:
-            ensure_in_palette(arm, char, slot, drawings[0])
+            ensure_in_palette(char, slot, drawings[0])
     return palette_image(char, slot)
 
 
@@ -464,7 +498,7 @@ def current_construction(arm, char: L.Character, rig: str) -> int:
 def set_drawing(arm, char: L.Character, slot: str, drawing: int):
     pb = arm.pose.bones[slot]
     pb["nirik_drawing"] = drawing
-    pb["nirik_tile"] = ensure_in_palette(arm, char, slot, drawing) if drawing else -1
+    pb["nirik_tile"] = ensure_in_palette(char, slot, drawing) if drawing else -1
     # Custom properties don't notify the depsgraph; without this the cards'
     # drivers keep showing the old drawing until something else updates.
     arm.update_tag()

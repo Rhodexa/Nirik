@@ -15,7 +15,7 @@ import bpy
 from bpy.app.handlers import persistent
 
 from ..core import library as L
-from . import rig_build
+from . import rig_build, sync
 
 SEARCH_LEVELS = 4  # how many folders above the .blend to look in
 
@@ -44,22 +44,33 @@ def find_library(old_path: str, blend_path: str) -> Path | None:
 
 
 def repair_palettes(arm, char: L.Character):
-    """Recreate missing or dangling tile links and re-point palette images."""
-    for slot, drawings in arm["nirik_palettes"].items():
+    """Make tiles and palette images valid again, and every part's tile index
+    match its drawing in the shared palette."""
+    # Files from before shared palettes kept one list per puppet: seed the
+    # shared palette from it so existing tile numbers stay meaningful.
+    for slot, drawings in dict(arm.get("nirik_palettes", {})).items():
+        if not rig_build.palette(char, slot):
+            rig_build._write_palette(char, slot, list(drawings))
+    slots = char.all_slots()
+    for slot in slots:
+        pal = rig_build.palette(char, slot)
+        if not pal:
+            continue
         folder = rig_build.palette_dir(char, slot)
-        folder.mkdir(parents=True, exist_ok=True)
-        for i, drawing in enumerate(drawings):
-            link = folder / f"t.{1001 + i}.png"
-            if not link.exists():  # missing, or a dangling symlink
-                if link.is_symlink():
-                    link.unlink()
-                os.symlink(os.path.relpath(char.drawing_path(drawing), folder), link)
+        for i, drawing in enumerate(pal):
+            if not (folder / f"t.{1001 + i}.png").exists():  # missing, or dangling
+                rig_build._link_tile(char, slot, i, drawing)
         image = bpy.data.images.get(f"nirik:{char.name}:{slot}")
         if image is not None:
             wanted = str(folder / "t.<UDIM>.png")
             if image.filepath != wanted:
                 image.filepath = wanted
-            image.reload()
+            rig_build.sync_tiles(image, char, slot)
+    for name in slots:
+        pb = arm.pose.bones.get(name)
+        if pb is not None and pb.get("nirik_drawing"):
+            pb["nirik_tile"] = rig_build.ensure_in_palette(char, name, pb["nirik_drawing"])
+    sync.sync_now(arm, char)  # keyed tiles too
 
 
 def relink(arm) -> bool:

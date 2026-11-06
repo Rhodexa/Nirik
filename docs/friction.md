@@ -30,10 +30,11 @@ become the priority list. Newest first within each section.
 - Drawing browser: you click the button under a thumbnail, not the
   thumbnail itself (Blender limitation; a matcap-style picker would allow it).
 - Stretching a part stretches its raster (smeared stripes, clipped tail tip).
-- New art (mailbox, envelope sheet) needs transparent backgrounds before
-  import.
 
 ## Fixed
+- Several puppets (or .blend files) of the same library repainted each
+  other's texture tiles: palettes are shared per library now.
+- Importing your own art: Import Prop (pictures and sprite sheets).
 - Characters missing pieces under an empty mask layer (Spike's walk head lost
   its skull): empty masks now mask nothing, as in Flash.
 - Selecting several exact pieces: Shift+double-click, Shift on panel buttons.

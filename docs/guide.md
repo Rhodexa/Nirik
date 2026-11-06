@@ -115,6 +115,20 @@ Children follow their parent (the head carries eyes, mouth, mane). `Alt+G`,
 Typical order: block poses with constructions (body, head angle), set
 expressions with Mouth/Brow/Blink swaps, then refine with transforms.
 
+## Props
+
+*Nirik tab → Import Prop*: pick an image and its height. A sprite sheet
+(separate pieces of art on one transparent image) becomes one prop whose
+drawings are the pieces, in reading order, centered on one canvas: swap them
+with the browser or Alt+Wheel like any part (Parts → **Art**). Single
+pictures pivot at the bottom (they stand on the ground), sheets at the center.
+The library is written to `library/<name>` next to the saved .blend.
+
+**Face Camera** (next to the character's name) keeps any character or prop
+turned toward the scene camera, upright. It's a Locked Track constraint on
+the armature: key its *Influence* to 0 to let it turn away, e.g. to reveal
+it's paper-thin.
+
 ## Walk cycles
 
 Walks are their own libraries (`library/twilight_walk_side`,

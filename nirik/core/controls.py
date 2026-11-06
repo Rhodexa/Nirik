@@ -13,7 +13,7 @@ from .library import Character
 
 ROOT = "ROOT"
 EYE_LAYERS = {"IRIS", "PUPIL", "HIGHLIGHTS"}
-SINGLE = (("MOUTH", "Mouth"), ("BROW", "Brow"), ("BLINK", "Blink"))
+SINGLE = (("MOUTH", "Mouth"), ("BROW", "Brow"), ("BLINK", "Blink"), ("ART", "Art"))  # ART: props
 
 
 def parts(char: Character) -> list[tuple[str, list[str]]]:
