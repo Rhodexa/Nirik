@@ -76,6 +76,18 @@ at all (2026-11-09). Ideas, together:
   thumbnail itself (Blender limitation; a matcap-style picker would allow it).
 - Stretching a part stretches its raster (smeared stripes, clipped tail tip).
 
+### Memory
+Measured 2026-11-09: one pose of Twilight on screen ~49 MB of GPU tiles at
+4x resolution; a whole puppet 30-55 MB of PNGs on disk (as vectors ~2-3 MB).
+- Palettes are shared per library and append-only, and every texture loads
+  all tiles in its palette: over a long project a part may hold hundreds of
+  tiles in GPU memory while a scene needs five. Fix: keep tile numbers
+  global but load only the tiles this .blend uses (sparse tiles).
+- Resolution per shot: puppets are rasterized at 4x; half resolution is a
+  quarter of the memory, and wide shots don't need 4x. Re-rasterizing is
+  cheap because the converter can always redo it from the source.
+- Stress test: load a real, busy show scene as puppets and measure.
+
 ## Ideas and side quests
 - **Vector drawings:** a drawing can be vector (e.g. Grease Pencil) instead
   of a raster, per part, for exact line quality. Nirik's half: display and
