@@ -105,10 +105,10 @@ def run(namespace):
     for name, fn in tests:
         try:
             fn()
-            print(f"PASS {name}")
+            print(f"\nPASS {name}")  # own line: Blender reports may lack a newline
         except Exception:
             failed += 1
-            print(f"FAIL {name}")
+            print(f"\nFAIL {name}")
             traceback.print_exc(file=sys.stdout)
     if failed:
         raise SystemExit(f"{failed} of {len(tests)} Blender tests failed")

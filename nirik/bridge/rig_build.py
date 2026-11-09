@@ -121,10 +121,20 @@ def palette_images(char: L.Character, slot: str) -> list:
             if im.get("nirik_library") == root and im.get("nirik_slot") == slot]
 
 
+def repair_links(char: L.Character, slot: str):
+    """Recreate missing or dangling tile links of `slot`'s palette (a moved
+    cache folder breaks relative links)."""
+    folder = palette_dir(char, slot)
+    for i, drawing in enumerate(palette(char, slot)):
+        if not (folder / f"t.{1001 + i}.png").exists():  # missing, or a dangling link
+            _link_tile(char, slot, i, drawing)
+
+
 def palette_image(char: L.Character, slot: str) -> bpy.types.Image:
     found = palette_images(char, slot)
     image = found[0] if found else None
     if image is None:
+        repair_links(char, slot)
         folder = palette_dir(char, slot)
         image = bpy.data.images.load(str(folder / "t.1001.png"), check_existing=False)
         image.name = f"nirik:{char.name}:{slot}"
@@ -352,6 +362,23 @@ def _drive(obj, prop: str, index: int, arm, bone: str, bone_prop: str, bone_inde
 # ── build ────────────────────────────────────────────────────────────────────
 
 def build(char: L.Character, collection=None, units_per_meter: float = UNITS_PER_METER) -> bpy.types.Object:
+    """Assemble a puppet in the scene. All or nothing: if anything fails,
+    whatever was created is removed again before the error is raised."""
+    kinds = ("objects", "collections", "armatures", "meshes", "materials", "images", "node_groups")
+    before = {k: set(getattr(bpy.data, k)) for k in kinds}
+    try:
+        return _build(char, collection, units_per_meter)
+    except Exception:
+        if bpy.context.object is not None and bpy.context.object.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
+        for k in kinds:
+            new = [d for d in getattr(bpy.data, k) if d not in before[k]]
+            if new:
+                bpy.data.batch_remove(new)
+        raise
+
+
+def _build(char: L.Character, collection, units_per_meter: float) -> bpy.types.Object:
     scene = bpy.context.scene
     coll = collection
     if coll is None:

@@ -57,9 +57,7 @@ def repair_palettes(arm, char: L.Character):
         if not pal:
             continue
         folder = rig_build.palette_dir(char, slot)
-        for i, drawing in enumerate(pal):
-            if not (folder / f"t.{1001 + i}.png").exists():  # missing, or dangling
-                rig_build._link_tile(char, slot, i, drawing)
+        rig_build.repair_links(char, slot)
         for image in rig_build.palette_images(char, slot):
             wanted = str(folder / "t.<UDIM>.png")
             if image.filepath != wanted:

@@ -12,6 +12,7 @@ others get plain defaults.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -96,6 +97,12 @@ def write(folder: Path, v2: dict):
     if old_cache.exists() and not new_cache.exists():
         new_cache.parent.mkdir(exist_ok=True)
         old_cache.rename(new_cache)
+        # Tile links are relative; one folder deeper they point nowhere.
+        for link in new_cache.glob("*/t.*.png"):
+            if link.is_symlink():
+                drawing = Path(os.readlink(link)).name
+                link.unlink()
+                link.symlink_to(os.path.relpath(folder / "drawings" / drawing, link.parent))
     conv = folder / ".converter"
     conv.mkdir(exist_ok=True)
     if (folder / "ids.json").exists():

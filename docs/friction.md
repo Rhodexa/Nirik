@@ -123,6 +123,13 @@ Measured 2026-11-09: one pose of Twilight on screen ~49 MB of GPU tiles at
   real-time from a microphone as a toy (2026-11-02)
 
 ## Fixed
+- First Load Symbol after the format upgrade failed once per library and
+  left a half-built puppet (armature + one dark card); Rarity then couldn't
+  load at all. The cache move broke every relative tile link, and a rebuild
+  next to the broken copy saved "nirik:rarity.001" into rarity.blend. Now:
+  links are checked before use and fixed by the upgrade, a failed build
+  removes everything it created, the .blend always holds the proper
+  collection name, and older ".001" files still load (2026-11-09).
 - Nirik guessed groups, labels, drawing sets and the far color from the
   show's naming conventions. Format version 2 (library.json) carries them
   explicitly; the converter writes them; all libraries upgraded without
