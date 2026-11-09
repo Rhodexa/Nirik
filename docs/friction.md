@@ -31,6 +31,19 @@ first within each section; `(date)` marks when an item came up.
   swapping puppets mid-shot. Want: a puppet with several cycles and its
   standing poses, switched by pose.
 
+### Poses are cages
+A puppet is a tree: each symbol has its own frames, each frame its own
+children. Nirik turns each symbol's frames into poses over a fixed set of
+slots, and only poses can show or place a slot. Example: the horn aura
+exists only in the head's magic poses, so it can't go on the profile head
+at all (2026-11-09). Ideas, together:
+- **Poses as defaults:** switch on any slot in any pose, pick its drawing,
+  place it yourself (what Flash animators did by copying an instance onto
+  a frame).
+- **Attachments:** a slot follows another slot, e.g. the aura follows the
+  horn, so it lands right in every pose without placing it per angle.
+- **Symbols that play their own frames** (below), with keyable opacity.
+
 ### Parts that move on their own
 - Looping parts: some parts animate by themselves whatever the puppet does,
   e.g. the horn magic aura (a 100-drawing loop) or Luna's waving mane. Nirik
