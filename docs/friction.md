@@ -74,7 +74,11 @@ at all (2026-11-09). Ideas, together:
   (2026-11-09)
 - Drawing browser: you click the button under a thumbnail, not the
   thumbnail itself (Blender limitation; a matcap-style picker would allow it).
-- Stretching a part stretches its raster (smeared stripes, clipped tail tip).
+- Stretching a part stretches its drawing (smeared stripes, clipped tail
+  tip). Vectors wouldn't keep line widths either: the show's outlines are
+  filled shapes, not strokes (Twilight: 93.5% of edges are fills, 9% of
+  shapes have any stroke; Spike 35%). Same limit the show had: redraw
+  instead of stretching far (2026-11-09).
 
 ### Memory
 Measured 2026-11-09: one pose of Twilight on screen ~49 MB of GPU tiles at
@@ -90,8 +94,10 @@ Measured 2026-11-09: one pose of Twilight on screen ~49 MB of GPU tiles at
 
 ## Ideas and side quests
 - **Vector drawings:** a drawing can be vector (e.g. Grease Pencil) instead
-  of a raster, per part, for exact line quality. Nirik's half: display and
-  pose vector drawings; the converter's half: export them (2026-11-09)
+  of a raster, per part. Gains: sharp at any zoom, 10-15x smaller, editable
+  in Blender. Not a gain for these files: constant line width when bending
+  (outlines are fills). Nirik's half: display and pose vector drawings; the
+  converter's half: export them (2026-11-09)
 - **Bendable cards:** a part's card as a grid instead of a quad, so a
   drawing can bend (Simple Deform, lattice, cloth). For things like the
   envelope, tails, manes (2026-11-06)
