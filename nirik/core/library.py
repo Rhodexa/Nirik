@@ -1,8 +1,15 @@
-"""Character library: character.json + drawings/<id>.png (written by an importer).
+"""A library folder: library.json + drawings, written by a converter.
 
-Coordinates: libraries store Flash-style 2D (y down, library units). Blender
-rigs live in a plane with y up, in meters. `to_plane` converts a library
-matrix; `socket_bones` splits it into the two bones that can express it.
+The format is specified in docs/format.md. Nirik only reads explicit
+fields; it never infers meaning from names. Version 1 (character.json) is
+still read during the transition, without groups or display labels.
+
+Coordinates (format section 5): 2D, y down, symbol units. Blender rigs live
+in a plane with y up, in meters: `to_plane` converts a matrix;
+`socket_bones` splits it into the two bones that can express it.
+
+Internal names still follow version 1: Character = library, Rig = symbol,
+Slot = layer, Construction = pose, SocketEntry = placement.
 """
 
 from __future__ import annotations
@@ -13,7 +20,9 @@ from pathlib import Path
 
 from .affine import decompose
 
-SCHEMA = 1
+SCHEMA = 1        # character.json (version 1)
+FORMAT = "nirik.library"
+VERSION = 2       # library.json
 Mat = tuple[float, float, float, float, float, float]  # (a, b, c, d, tx, ty)
 
 
@@ -21,12 +30,13 @@ Mat = tuple[float, float, float, float, float, float]  # (a, b, c, d, tx, ty)
 class Slot:
     name: str
     rig: str
-    layer: str
+    layer: str                       # source layer name (version 1); kept for reference
     order: int
     mask: bool = False
     masked_by: str | None = None
     child_rig: str | None = None
     canvas: tuple[float, float, float, float] | None = None  # x0, y0, x1, y1 (library units)
+    label: str = ""                  # display name
 
 
 @dataclass
@@ -59,8 +69,14 @@ class Rig:
 class Drawing:
     id: int
     slot: str
-    symbol: str
-    tags: list[str] = field(default_factory=list)
+    label: str = ""
+    tags: list[str] = field(default_factory=list)   # "key:value" (version 2)
+    file: str = ""
+
+    def tag(self, key: str) -> str | None:
+        """Value of a `key:value` tag, e.g. tag("chart") -> "mouth-3q"."""
+        prefix = key + ":"
+        return next((t[len(prefix):] for t in self.tags if t.startswith(prefix)), None)
 
 
 @dataclass
@@ -72,9 +88,14 @@ class Character:
     rigs: dict[str, Rig]
     drawings: dict[int, Drawing]
     cycle: dict | None = None  # {"frames": n, "speed": units/frame}: root rig loops in place
+    groups: list[tuple[str, list[str]]] = field(default_factory=list)  # (label, layer ids)
+    far: tuple[float, ...] | None = None   # far-side color placement, if the library has one
+    units_per_meter: float | None = None
+    label: str = ""
 
     def drawing_path(self, drawing: int) -> Path:
-        return self.root / "drawings" / f"{drawing}.png"
+        d = self.drawings.get(drawing)
+        return self.root / (d.file if d and d.file else f"drawings/{drawing}.png")
 
     def all_slots(self) -> dict[str, Slot]:
         return {s.name: s for r in self.rigs.values() for s in r.slots}
@@ -83,16 +104,7 @@ class Character:
         return sorted(d.id for d in self.drawings.values() if d.slot == slot)
 
     def far_color(self) -> tuple[float, ...] | None:
-        """The darkening the riggers apply to far-side limbs: the most common
-        darkening color transform across the stock poses (mult + offset)."""
-        counts: dict[tuple, int] = {}
-        for rig in self.rigs.values():
-            for cons in rig.constructions:
-                for entry in cons.slots.values():
-                    c = entry.color
-                    if c and c[3] == 1 and c[7] == 0 and sum(c[4:7]) < 0 and min(c[:3]) >= 0.99:
-                        counts[c] = counts.get(c, 0) + 1
-        return max(counts, key=counts.get) if counts else None
+        return self.far
 
     def draw_order(self, construction: int | None = None) -> list[str]:
         """Drawable slots back to front, expanding child rigs in place.
@@ -113,17 +125,70 @@ class Character:
         return out
 
 
+def description(root: Path) -> Path:
+    """The library's description file: library.json, or version 1's."""
+    v2 = root / "library.json"
+    return v2 if v2.exists() else root / "character.json"
+
+
 def load(root: str | Path) -> Character:
     root = Path(root).resolve()
-    data = json.loads((root / "character.json").read_text())
+    path = description(root)
+    data = json.loads(path.read_text())
+    if path.name == "library.json":
+        if data.get("format") != FORMAT or data.get("version") != VERSION:
+            raise ValueError(f"{path}: not a Nirik library version {VERSION}")
+        return _load_v2(root, data)
     if data.get("schema") != SCHEMA:
         raise ValueError(f"{root}: unsupported library schema {data.get('schema')}")
+    return _load_v1(root, data)
+
+
+def _load_v2(root: Path, data: dict) -> Character:
+    rigs = {}
+    for sid, sym in data["symbols"].items():
+        slots = []
+        for order, layer in enumerate(sym["layers"]):
+            symbols = layer.get("symbols") or []
+            slots.append(Slot(name=layer["id"], rig=sid, layer=layer.get("label", layer["id"]),
+                              order=order, mask=layer.get("kind") == "mask",
+                              masked_by=layer.get("masked_by"),
+                              child_rig=symbols[0] if layer.get("kind") == "symbol" and symbols else None,
+                              canvas=tuple(layer["canvas"]) if "canvas" in layer else None,
+                              label=layer.get("label", layer["id"])))
+        poses = []
+        for i, pose in enumerate(sym["poses"]):
+            entries = {k: SocketEntry(matrix=tuple(v["matrix"]),
+                                      color=tuple(v["color"]) if "color" in v else None,
+                                      drawing=v.get("drawing", 0), construction=v.get("pose"))
+                       for k, v in pose["layers"].items()}
+            labels = [pose["label"]] if pose.get("label") else []
+            poses.append(Construction(id=i, labels=labels + pose.get("tags", []),
+                                      frames=pose.get("frames", []), slots=entries))
+        rigs[sid] = Rig(sid, slots, poses)
+        if sid == data["root"] and sym.get("cycle"):
+            first, last = sym["cycle"]["poses"]
+            cycle = {"frames": last - first + 1, "speed": sym["cycle"].get("speed")}
+    drawings = {int(k): Drawing(int(k), d["layer"], d.get("label", ""), d.get("tags", []),
+                                d.get("file", ""))
+                for k, d in data["drawings"].items()}
+    root_sym = data["symbols"][data["root"]]
+    return Character(root, root.name, data["pixels_per_unit"], data["root"], rigs, drawings,
+                     cycle if root_sym.get("cycle") else None,
+                     groups=[(g["label"], list(g["layers"])) for g in data.get("groups", [])],
+                     far=tuple(data["far_color"]) if data.get("far_color") else None,
+                     units_per_meter=data.get("units_per_meter"), label=data.get("label", ""))
+
+
+def _load_v1(root: Path, data: dict) -> Character:
+    """Version 1, read as-is: no groups, no display labels beyond raw names."""
     rigs = {}
     for rname, r in data["rigs"].items():
         slots = [Slot(name=s["name"], rig=rname, layer=s["layer"], order=s["order"],
                       mask=s.get("mask", False), masked_by=s.get("masked_by"),
                       child_rig=s.get("rig"),
-                      canvas=tuple(s["canvas"]) if "canvas" in s else None)
+                      canvas=tuple(s["canvas"]) if "canvas" in s else None,
+                      label=s["layer"])
                  for s in r["slots"]]
         cons = [Construction(id=c["id"], labels=c["labels"], frames=c["frames"],
                              slots={k: SocketEntry(matrix=tuple(v["matrix"]),

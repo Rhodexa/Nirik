@@ -1,8 +1,9 @@
-# Nirik library format, version 2 (proposal)
+# Nirik library format, version 2
 
-Status: **draft for review**, second pass after review on 2026-11-09.
-Nothing here is implemented yet. Version 1 is what `character.json` holds
-today; section 10 maps old to new.
+Status: **implemented** (2026-11-09) except the reserved parts (sections 7
+and 8) and symbol layers holding more than one symbol (Nirik uses the
+first). Version 1 (`character.json`) is still read, without groups or
+display labels; `python -m devtools.library_v2 <folder>` upgrades it.
 
 ## 1. The line this format draws
 
@@ -153,6 +154,7 @@ These conventions happen to match Flash's; they are this format's own.
 {
   "label": "Rotation 3",
   "tags": ["view:3/4"],
+  "frames": [102, 103],      // optional: the source frames this pose came from
   "layers": {
     "Head.MOUTH": { "drawing": 1347, "matrix": [1, 0, 0, 1, 12.5, 40.0] },
     "Character.HEAD": { "symbol": "Head", "pose": 4,

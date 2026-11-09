@@ -34,7 +34,7 @@ def test_library_recomposes_source_rig(library, construction):
     doc = fla.load(STOCK)
     ev = E.Evaluator(doc)
     root = next(s for s in doc.symbols if s.endswith("~PTS_Character"))
-    frame = lib.rigs["Character"]["constructions"][construction]["frames"][0]
+    frame = lib.constructions("Character")[construction].frames[0]
 
     x0, y0, x1, y1 = nodes_bbox(ev.evaluate(frame, root=root))
     w, h = int(x1 - x0) + 20, int(y1 - y0) + 20
@@ -48,12 +48,13 @@ def test_library_recomposes_source_rig(library, construction):
 
 
 def test_reimport_keeps_drawing_ids(library):
-    before = json.loads((library / "ids.json").read_text())
+    ids = library / ".converter" / "ids.json"
+    before = json.loads(ids.read_text())
     import_character(STOCK, "~PTS_Character", "twilight", library, ppu=2.0, jobs=6)
-    assert json.loads((library / "ids.json").read_text()) == before
+    assert json.loads(ids.read_text()) == before
 
 
 def test_mouths_carry_phoneme_tags(library):
-    drawings = Library(library).data["drawings"].values()
-    tags = {tag for d in drawings if d["symbol"] == "PTS_Mouth_3-4" for tag in d["tags"]}
-    assert {"happy", "sad", "a,e,i", "m,b,p"} <= tags
+    drawings = Library(library).char.drawings.values()
+    tags = {tag for d in drawings if d.tag("chart") == "mouth-3-4" for tag in d.tags}
+    assert {"label:happy", "label:sad", "phoneme:a,e,i", "phoneme:m,b,p"} <= tags

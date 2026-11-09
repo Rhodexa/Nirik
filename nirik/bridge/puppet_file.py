@@ -25,7 +25,7 @@ def collection_name(char: L.Character) -> str:
 
 
 def is_current(char: L.Character) -> bool:
-    blend, description = path(char), char.root / "character.json"
+    blend, description = path(char), L.description(char.root)
     return blend.exists() and blend.stat().st_mtime >= description.stat().st_mtime
 
 

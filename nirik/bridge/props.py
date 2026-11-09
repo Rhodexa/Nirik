@@ -92,22 +92,23 @@ def import_prop(image: Path, name: str, out: Path, height: float, split: bool = 
         ox, oy = (cw - (x1 - x0)) // 2, (ch - (y1 - y0)) if pivot == "BOTTOM" else (ch - (y1 - y0)) // 2
         canvas[oy:oy + y1 - y0, ox:ox + x1 - x0] = rgba[y0:y1, x0:x1]
         _save_rgba(out / "drawings" / f"{i}.png", bleed(canvas))
-        drawings[str(i)] = {"slot": SLOT, "symbol": name, "frames": [i - 1], "tags": [f"#{i}"]}
+        drawings[str(i)] = {"layer": SLOT, "label": f"{name} {i}" if len(boxes) > 1 else name,
+                            "tags": [f"chart:{name}"], "file": f"drawings/{i}.png"}
 
-    # Library units: rig_build.UNITS_PER_METER per meter; ppu = canvas pixels per unit.
+    # Symbol units: rig_build.UNITS_PER_METER per meter; ppu = canvas pixels per unit.
     ppu = (ch - 2 * margin) / (height * rig_build.UNITS_PER_METER)
     uw, uh = cw / ppu, ch / ppu
-    top = -uh if pivot == "BOTTOM" else -uh / 2  # library y points down
+    top = -uh if pivot == "BOTTOM" else -uh / 2  # y points down
     data = {
-        "schema": L.SCHEMA, "name": name, "ppu": ppu, "root_rig": "Prop",
-        "source": {"file": image.name, "pieces": len(boxes)},
-        "rigs": {"Prop": {"symbol": name, "slots": [
-            {"name": SLOT, "layer": "ART", "order": 0, "canvas": [-uw / 2, top, uw / 2, top + uh]}],
-            "constructions": [{"id": 0, "frames": [0], "labels": [],
-                               "slots": {SLOT: {"matrix": [1, 0, 0, 1, 0, 0], "drawing": 1}}}]}},
+        "format": L.FORMAT, "version": L.VERSION, "label": name, "root": "Prop",
+        "pixels_per_unit": ppu, "units_per_meter": rig_build.UNITS_PER_METER,
+        "symbols": {"Prop": {"label": name, "layers": [
+            {"id": SLOT, "label": "Art", "kind": "drawing", "canvas": [-uw / 2, top, uw / 2, top + uh]}],
+            "poses": [{"label": "", "layers": {SLOT: {"drawing": 1, "matrix": [1, 0, 0, 1, 0, 0]}}}]}},
         "drawings": drawings,
+        "groups": [{"label": "Art", "layers": [SLOT]}],
     }
-    (out / "character.json").write_text(json.dumps(data, indent=1))
+    (out / "library.json").write_text(json.dumps(data, indent=1))
     return out
 
 

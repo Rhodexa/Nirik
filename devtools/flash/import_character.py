@@ -15,7 +15,8 @@ Each drawing is flattened (all structural nesting baked in) and rasterized
 onto its slot's canonical canvas: the union bounds of every drawing the slot
 can show, in the slot's local units. Swapping drawings never moves anything.
 
-Output: character.json, drawings/<id>.png, ids.json (stable drawing IDs that
+Output (format version 2, docs/format.md): library.json, drawings/<id>.png,
+.converter/ids.json (stable drawing IDs that
 survive re-imports; 0 means "empty").
 """
 
@@ -37,6 +38,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from .. import library_v2
 from . import evaluate as E
 from . import fla, render
 from .fla import FI, t
@@ -349,7 +351,10 @@ def import_character(path: Path, root: str, name: str, out: Path, ppu: float, jo
 
     # Pass 1: every frame of every symbol a slot can show -> unique drawings + bounds.
     out.mkdir(parents=True, exist_ok=True)
-    ids_path = out / "ids.json"
+    ids_path = out / ".converter" / "ids.json"
+    if not ids_path.exists() and (out / "ids.json").exists():  # version 1 location
+        ids_path.parent.mkdir(exist_ok=True)
+        (out / "ids.json").replace(ids_path)
     ids: dict[str, int] = json.loads(ids_path.read_text()) if ids_path.exists() else {}
     next_id = max(ids.values(), default=0) + 1
 
@@ -442,7 +447,11 @@ def import_character(path: Path, root: str, name: str, out: Path, ppu: float, jo
         "drawings": {str(did): {k: v for k, v in d.items() if k != "frames"} | {"frames": d["frames"]}
                      for did, d in sorted(drawings.items())},
     }
-    (out / "character.json").write_text(json.dumps(character, indent=1))
+    # The description is assembled in version 1's shape, then written as
+    # version 2 with the show's conventions made explicit (groups, labels,
+    # tags, far color): Nirik itself never reads names for meaning.
+    library_v2.write(out, library_v2.from_v1(character, flash=True))
+    ids_path.parent.mkdir(exist_ok=True)
     ids_path.write_text(json.dumps(ids, indent=0, sort_keys=True))
     n_cons = sum(len(r["constructions"]) for r in character["rigs"].values())
     print(f"{name}: {len(character['rigs'])} rigs, {len(slots_by_name)} slots, "

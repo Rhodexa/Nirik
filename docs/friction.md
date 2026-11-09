@@ -119,13 +119,14 @@ Measured 2026-11-09: one pose of Twilight on screen ~49 MB of GPU tiles at
   envelope, tails, manes (2026-11-06)
 - **Vocabulary:** Puppet / Symbol / Node / Pose instead of character / rig /
   slot / construction; rename UI and format together (2026-11-06)
-- **Stop guessing:** Nirik reads parts, labels, sets and the far color from
-  the puppet instead of inferring them from naming conventions; the format
-  documents its coordinate convention as Nirik's own (2026-11-06)
 - **Lip sync** from audio, keyed by the mouth drawings' phoneme tags;
   real-time from a microphone as a toy (2026-11-02)
 
 ## Fixed
+- Nirik guessed groups, labels, drawing sets and the far color from the
+  show's naming conventions. Format version 2 (library.json) carries them
+  explicitly; the converter writes them; all libraries upgraded without
+  re-rendering (2026-11-09).
 - Key bloat: a construction change keyed every hidden channel of the
   character. Now only changes are keyed, and channels that never change
   get no curve: 40 pose changes went from 1,489 channels (~59,000 keys) to

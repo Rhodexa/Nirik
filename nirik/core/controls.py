@@ -1,60 +1,33 @@
-"""Animator-facing parts: which bones a click on "Mouth" or "Eye 1" selects.
+"""Animator-facing selection: what the Parts buttons hold, what a click selects.
 
-Derived from the stock rigs' semantic layer names, so any character imported
-from the show's rigs gets the same short list. Everything else stays reachable
-as "more" controls.
+Everything comes from the library's structure and its explicit groups
+(docs/format.md): Body (the root), one button per nested symbol (Head), then
+the library's groups (Mouth, Eye 1, ...). Nirik doesn't read layer names.
 """
 
 from __future__ import annotations
 
-import re
-
 from .library import Character
 
 ROOT = "ROOT"
-EYE_LAYERS = {"IRIS", "PUPIL", "HIGHLIGHTS"}
-SINGLE = (("MOUTH", "Mouth"), ("BROW", "Brow"), ("BLINK", "Blink"), ("ART", "Art"))  # ART: props
 
 
 def parts(char: Character) -> list[tuple[str, list[str]]]:
     """[(label, bone names)], in panel order."""
     out: list[tuple[str, list[str]]] = [("Body", [ROOT])]
-    slots = list(char.all_slots().values())
-    out += [(s.child_rig, [s.name]) for s in slots if s.child_rig]
-
-    for layer, label in SINGLE:
-        matches = [s.name for s in slots if s.layer.strip().upper() == layer]
-        for i, name in enumerate(matches, 1):
-            out.append((label if len(matches) == 1 else f"{label} {i}", [name]))
-
-    masks = [s for s in slots if s.mask]
-    for i, mask in enumerate(masks, 1):
-        eye = [s.name for s in slots
-               if s.masked_by == mask.name and s.layer.strip().upper() in EYE_LAYERS]
-        if eye:
-            out.append((f"Eye {i}" if len(masks) > 1 else "Eye", eye))
-    return out
+    slots = char.all_slots()
+    out += [(char.rigs[s.child_rig].name if s.child_rig in char.rigs else s.child_rig, [s.name])
+            for s in slots.values() if s.child_rig]
+    out += [(label, [n for n in layers if n in slots]) for label, layers in char.groups]
+    return [(label, bones) for label, bones in out if bones]
 
 
 def main_bones(char: Character) -> set[str]:
     return {b for _, bones in parts(char) for b in bones}
 
 
-def label(slot_name: str) -> str:
-    """'Character.Hind leg_2' -> 'Hind Leg 2', 'Head.EAR_3' -> 'Ear 3'."""
-    layer = slot_name.split(".", 1)[-1]
-    base, _, n = layer.rpartition("_")
-    if not (base and n.isdigit()):
-        base, n = layer, ""
-    words = base.replace("=", " ").split()
-    # Title-case, but keep short abbreviations ("OL" = outline) as they are.
-    text = " ".join(w.capitalize() if w.islower() or (w.isupper() and len(w) > 2) else w
-                    for w in words)
-    return f"{text} {n}".strip()
-
-
 def more_parts(char: Character) -> dict[str, list[str]]:
-    """Drawable slots outside the main parts, per rig: {rig: [slot names]}."""
+    """Drawable layers outside the Parts buttons, per symbol: {symbol: [layer ids]}."""
     main = main_bones(char)
     out: dict[str, list[str]] = {}
     for rig in char.rigs.values():
@@ -64,41 +37,32 @@ def more_parts(char: Character) -> dict[str, list[str]]:
     return out
 
 
-def drawing_label(symbol: str) -> str:
-    """What a drawing shows: 'PTS_Wing_Front' -> 'Wing Front', 'PTS_HindLeg_3-4nomark' ->
-    'Hind Leg 3-4nomark'. Riggers reuse layers (a layer named "Neck" may hold a
-    wing), so the current drawing names a part better than its layer does."""
-    parts = symbol.split("_")
-    if len(parts) > 1 and parts[0].isupper():
-        parts = parts[1:]  # rig code (PTS, RY, ...)
-    words = [w for p in parts for w in re.sub(r"(?<=[a-z])(?=[A-Z])", " ", p).split()]
-    return " ".join(words)
-
-
 def part_for_slot(char: Character, slot: str) -> list[str]:
     """Bones a plain click on `slot`'s artwork selects.
 
-    Face features select their part (an eye's iris, pupil, highlights or white
-    all select that eye's look); anything else in a child rig selects the
-    control that carries the rig (the head); body pieces select the body.
+    A layer in a group selects the group; a layer clipped by the same mask as
+    a group's layers (an eye white under the eye mask) selects that group;
+    anything else in a nested symbol selects the layer carrying the symbol
+    (the head); the rest selects the body.
     """
+    slots = char.all_slots()
     for _, bones in parts(char):
         if slot in bones:
             return bones
-    s = char.all_slots()[slot]
+    s = slots[slot]
     if s.masked_by:
-        for label, bones in parts(char):
-            if label.startswith("Eye") and char.all_slots()[bones[0]].masked_by == s.masked_by:
-                return bones
+        for _, layers in char.groups:
+            if any(slots[n].masked_by == s.masked_by for n in layers if n in slots):
+                return [n for n in layers if n in slots]
     if s.rig != char.root_rig:
-        holder = next((h.name for h in char.all_slots().values() if h.child_rig == s.rig), None)
+        holder = next((h.name for h in slots.values() if h.child_rig == s.rig), None)
         if holder:
             return [holder]
     return [ROOT]
 
 
 def part_level_bones(char: Character) -> set[str]:
-    """Bones a plain click can select: main parts, rig carriers, the body."""
+    """Bones a plain click can select: groups, symbol carriers, the body."""
     return main_bones(char) | {s.name for s in char.all_slots().values() if s.child_rig} | {ROOT}
 
 

@@ -51,7 +51,12 @@ def safe(name: str) -> str:
 # ── palettes (tiled images) ──────────────────────────────────────────────────
 
 def palette_dir(char: L.Character, slot: str) -> Path:
-    return char.root / ".udim" / safe(slot)
+    folder = char.root / ".nirik" / "palettes"
+    old = char.root / ".udim"  # version 1 location
+    if old.is_dir() and not folder.exists():
+        folder.parent.mkdir(exist_ok=True)
+        old.rename(folder)
+    return folder / safe(slot)
 
 
 PALETTE_FILE = "palette.json"

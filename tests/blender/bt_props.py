@@ -38,7 +38,8 @@ def test_import_prop_operator_splits_sheet():
     write_sheet(sheet)
     bpy.ops.wm.save_as_mainfile(filepath=str(TMP / "scene.blend"))
     assert bpy.ops.nirik.import_prop(filepath=str(sheet), height=0.5) == {"FINISHED"}
-    data = json.loads((TMP / "library" / "sheet" / "character.json").read_text())
+    data = json.loads((TMP / "library" / "sheet" / "library.json").read_text())
+    assert data["format"] == "nirik.library" and data["version"] == 2
     assert len(data["drawings"]) == 3
     arm = bpy.context.active_object
     assert arm["nirik_library"].endswith("library/sheet")

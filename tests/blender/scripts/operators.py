@@ -56,7 +56,7 @@ def test_step_drawing_grows_palette_and_keys():
     pb = arm.pose.bones["Head.MOUTH"]
     assert pb["nirik_drawing"] != 0
     assert len(rig_build.palette(character_for(arm), "Head.MOUTH")) > pal_before
-    image = bpy.data.images[f"nirik:twilight:Head.MOUTH"]
+    image = rig_build.palette_images(character_for(arm), "Head.MOUTH")[0]
     assert len(image.tiles) == len(rig_build.palette(character_for(arm), "Head.MOUTH"))
     fcurves = [fc for layer in arm.animation_data.action.layers for strip in layer.strips
                for bag in strip.channelbags for fc in bag.fcurves]
@@ -69,7 +69,7 @@ def test_swap_updates_without_frame_change():
     arm = state["arm"]
     arm.animation_data_clear()
     _select(arm, "Head.MOUTH")
-    card = bpy.data.objects["twilight:Head.MOUTH"]
+    card = rig_build.card_of(state["arm"], "Head.MOUTH")
     bpy.context.view_layer.update()
     before = card.evaluated_get(bpy.context.evaluated_depsgraph_get())["nirik_tile"]
     bpy.ops.nirik.step_drawing(step=1, scope="SLOT")
@@ -93,7 +93,7 @@ def test_iris_outside_eye_is_clipped():
     scene.camera = cam
     eye = [b for label, bones in __import__("nirik.core.controls", fromlist=["x"]).parts(
         __import__("nirik.ui", fromlist=["x"]).character_for(arm)) if label == "Eye 1" for b in bones]
-    cards = [bpy.data.objects[f"twilight:{b}"] for b in eye]
+    cards = [rig_build.card_of(arm, b) for b in eye]
     _, base = harness.render("ops_eye_base", 1)
     for b in eye:
         arm.pose.bones[b].location.x += 0.5  # far outside the eye
@@ -197,7 +197,7 @@ def test_rebuild_follows_retimed_construction_keys():
 def test_card_origins_share_one_line():
     # EEVEE sorts transparent objects by origin; per-part origins break the
     # layering as soon as the camera turns.
-    cards = [o for o in bpy.data.objects if o.type == "MESH" and o.name.startswith("twilight:")]
+    cards = [o for o in state["arm"].children if "nirik_slot" in o]
     xs = {round(o.matrix_world.translation.x, 6) for o in cards}
     zs = {round(o.matrix_world.translation.z, 6) for o in cards}
     assert xs == {0.0} and zs == {0.0}
@@ -210,7 +210,7 @@ def _artwork_point(arm, char, slot, want_mask=True):
     from mathutils import Vector
     from nirik.bridge import picking
     dg = bpy.context.evaluated_depsgraph_get()
-    card = bpy.data.objects[f"twilight:{slot}"].evaluated_get(dg)
+    card = rig_build.card_of(state["arm"], slot).evaluated_get(dg)
     v0, v1, _, v3 = (card.matrix_world @ v.co for v in card.data.vertices)
     alpha = picking.drawing_alpha(char, arm.pose.bones[slot]["nirik_drawing"])
     mask = char.all_slots()[slot].masked_by
@@ -304,7 +304,7 @@ def test_layer_moves_restack_cards_and_picking():
 
     def y(slot):
         bpy.context.view_layer.update()
-        return bpy.data.objects[f"twilight:{slot}"].matrix_world.translation.y
+        return rig_build.card_of(state["arm"], slot).matrix_world.translation.y
 
     bpy.ops.nirik.select_part(bones=leg)
     assert bpy.ops.nirik.layer(how="FRONT") == {"FINISHED"}
@@ -334,7 +334,7 @@ def test_far_side_darkens():
     char = character_for(arm)
     slot = next(s for s in char.draw_order() if arm.pose.bones[s]["nirik_drawing"]
                 and arm.pose.bones[f"{s}.SOCKET"]["nirik_color"][4] == 0)
-    card = bpy.data.objects[f"twilight:{slot}"]
+    card = rig_build.card_of(state["arm"], slot)
     bpy.ops.nirik.select_part(bones=slot)
 
     def off():
@@ -364,7 +364,7 @@ def test_overlay_box_covers_carried_artwork():
     mx0, mz0, mx1, mz1 = box(mouth)
     assert bx0 <= mx0 and bz0 <= mz0 and mx1 <= bx1 and mz1 <= bz1
     # Tight to the artwork, not the padded canvas
-    card = bpy.data.objects["twilight:Head.MOUTH"].evaluated_get(dg)
+    card = rig_build.card_of(state["arm"], "Head.MOUTH").evaluated_get(dg)
     canvas = [card.matrix_world @ v.co for v in card.data.vertices]
     assert (mx1 - mx0) < (max(p.x for p in canvas) - min(p.x for p in canvas))
 

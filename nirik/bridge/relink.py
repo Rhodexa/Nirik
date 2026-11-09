@@ -23,7 +23,7 @@ SEARCH_LEVELS = 4  # how many folders above the .blend to look in
 def find_library(old_path: str, blend_path: str) -> Path | None:
     """Same library folder name ("library/twilight") near the .blend."""
     old = Path(old_path)
-    if (old / "character.json").exists():
+    if L.description(old).exists():
         return old
     tail = Path(*old.parts[-2:])  # e.g. library/twilight
     folders = []
@@ -38,7 +38,7 @@ def find_library(old_path: str, blend_path: str) -> Path | None:
     folders.append(Path(__file__).resolve().parents[2])
     for folder in folders:
         for candidate in (folder / tail, folder / old.name):
-            if (candidate / "character.json").exists():
+            if L.description(candidate).exists():
                 return candidate
     return None
 

@@ -38,7 +38,7 @@ def redraw_viewports(context):
 
 def part_label(arm, char, slot: str) -> str:
     drawing = char.drawings.get(arm.pose.bones[slot]["nirik_drawing"])
-    return controls.drawing_label(drawing.symbol) if drawing else controls.label(slot)
+    return drawing.label if drawing and drawing.label else char.all_slots()[slot].label
 
 
 def select_bones(arm, char, names: list[str], extend: bool = False):
@@ -83,6 +83,10 @@ class NIRIK_OT_load_character(bpy.types.Operator):
             return {"CANCELLED"}
         load_and_select(context, char)
         return {"FINISHED"}
+
+
+def L_description_exists(folder: Path) -> bool:
+    return library.description(folder).exists()
 
 
 def library_home(context) -> Path:
@@ -136,7 +140,7 @@ class NIRIK_OT_import_prop(bpy.types.Operator):
         image = Path(self.filepath)
         name = bpy.path.clean_name(self.name or image.stem).lower()
         out = library_home(context) / name
-        if (out / "character.json").exists():
+        if L_description_exists(out):
             self.report({"ERROR"}, f"{out} already exists; pick another name")
             return {"CANCELLED"}
         try:
@@ -168,9 +172,9 @@ class NIRIK_OT_face_camera(bpy.types.Operator):
 
 
 class NIRIK_OT_step_construction(bpy.types.Operator):
-    """Switch to the previous/next construction of a rig"""
+    """Switch a symbol to its previous/next pose"""
     bl_idname = "nirik.step_construction"
-    bl_label = "Step Construction"
+    bl_label = "Step Pose"
     bl_options = {"REGISTER", "UNDO"}
 
     rig: StringProperty()
@@ -346,8 +350,8 @@ class NIRIK_OT_step_drawing(bpy.types.Operator):
         current = arm.pose.bones[slot]["nirik_drawing"]
         options = [0] + char.slot_drawings(slot)
         if self.scope == "SYMBOL" and current in char.drawings:
-            symbol = char.drawings[current].symbol
-            options = [d for d in options[1:] if char.drawings[d].symbol == symbol]
+            chart = char.drawings[current].tag("chart")
+            options = [d for d in options[1:] if char.drawings[d].tag("chart") == chart]
         index = options.index(current) if current in options else 0
         drawing = options[(index + self.step) % len(options)]
         rig_build.set_drawing(arm, char, slot, drawing)
@@ -377,7 +381,7 @@ class NIRIK_PT_main(bpy.types.Panel):
             return
 
         box = layout.box()
-        box.label(text="Parts", icon="RESTRICT_SELECT_OFF")
+        box.label(text="Groups", icon="RESTRICT_SELECT_OFF")
         grid = box.grid_flow(columns=3, align=True)
         selected = {pb.name for pb in arm.pose.bones if pb.select} if context.mode == "POSE" else set()
         for label, bones in controls.parts(char):
@@ -399,7 +403,7 @@ class NIRIK_PT_main(bpy.types.Panel):
             # Blender value; change it with the arrows (typing skips the rig).
             sub = row.row(align=True)
             sub.enabled = False
-            sub.prop(control, '["nirik_construction"]', text=rig.name)
+            sub.prop(control, '["nirik_construction"]', text=f"{rig.name} Pose")
             op = row.operator("nirik.step_construction", text="", icon="TRIA_RIGHT")
             op.rig, op.step = rig.name, 1
             labels = ", ".join(rig.constructions[cid].labels)
@@ -431,9 +435,9 @@ class NIRIK_PT_main(bpy.types.Panel):
         if drawable:
             sub = row.row(align=True)
             sub.enabled = False
-            sub.prop(pb, '["nirik_layer"]', text="Layer")
+            sub.prop(pb, '["nirik_layer"]', text="Stack")
         else:
-            row.label(text="Layer")
+            row.label(text="Stack")
         row.operator("nirik.layer", text="", icon="TRIA_UP").how = "FORWARD"
         row.operator("nirik.layer", text="", icon="TRIA_UP_BAR").how = "FRONT"
         row.operator("nirik.layer", text="", icon="LOOP_BACK").how = "RESET"
@@ -463,9 +467,10 @@ class NIRIK_PT_main(bpy.types.Panel):
         sub.prop(arm.pose.bones[slot], '["nirik_drawing"]', text="Drawing")
         row.operator("nirik.step_drawing", text="", icon="TRIA_RIGHT").step = 1
         box.operator("nirik.browse_drawings", text="Browse Drawings (Alt+D)", icon="IMAGE_DATA")
-        box.label(text=drawing.symbol if drawing else "(empty)")
-        if drawing and drawing.tags:
-            box.label(text=" · ".join(drawing.tags), icon="BOOKMARKS")
+        box.label(text=drawing.label if drawing else "(empty)")
+        shown = [t.split(":", 1)[-1] for t in (drawing.tags if drawing else []) if not t.startswith("chart:")]
+        if shown:
+            box.label(text=" · ".join(shown), icon="BOOKMARKS")
         box.label(text=f"{len(char.slot_drawings(slot))} drawings, "
                        f"{len(rig_build.palette(char, slot))} loaded", icon="IMAGE_DATA")
         box.label(text="Alt+Wheel: swap (same set)", icon="MOUSE_MMB_SCROLL")
@@ -694,11 +699,12 @@ class NIRIK_OT_browse_drawings(bpy.types.Operator):
         slot = active_slot(context, char)
         current = arm.pose.bones[slot]["nirik_drawing"]
         options = char.slot_drawings(slot)
-        symbol = char.drawings[current].symbol if current in char.drawings else None
-        if not self.show_all and symbol:
-            options = [d for d in options if char.drawings[d].symbol == symbol]
-        # Current set first, then the other sets grouped together.
-        options.sort(key=lambda d: (char.drawings[d].symbol != symbol, char.drawings[d].symbol, d))
+        chart = char.drawings[current].tag("chart") if current in char.drawings else None
+        if not self.show_all and chart:
+            options = [d for d in options if char.drawings[d].tag("chart") == chart]
+        # Current chart first, then the other charts grouped together.
+        options.sort(key=lambda d: (char.drawings[d].tag("chart") != chart,
+                                    char.drawings[d].tag("chart") or "", d))
         layout = self.layout
         row = layout.row()
         row.label(text=f"{part_label(arm, char, slot)}: {len(options)} drawings")
@@ -707,7 +713,8 @@ class NIRIK_OT_browse_drawings(bpy.types.Operator):
         for d in options[:BROWSER_LIMIT]:
             col = grid.column(align=True)
             col.template_icon(icon_value=drawing_icon(char, d), scale=5.0)
-            tags = " · ".join(t for t in char.drawings[d].tags if t.strip("- "))[:22]
+            tags = " · ".join(t.split(":", 1)[-1] for t in char.drawings[d].tags
+                              if not t.startswith("chart:") and t.split(":", 1)[-1].strip("- "))[:22]
             op = col.operator("nirik.set_drawing", text=tags or f"#{d}", depress=d == current)
             op.drawing = d
         if len(options) > BROWSER_LIMIT:
@@ -734,7 +741,7 @@ class NIRIK_OT_rebuild(bpy.types.Operator):
 
 
 class NIRIK_PT_more(bpy.types.Panel):
-    bl_label = "More Parts"
+    bl_label = "More Layers"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "Nirik"
@@ -749,7 +756,7 @@ class NIRIK_PT_more(bpy.types.Panel):
         arm = nirik_armature(context)
         char = character_for(arm)
         layout = self.layout
-        layout.label(text="Parts showing a drawing in this pose:")
+        layout.label(text="Layers showing a drawing in this pose:")
         for rig, names in controls.more_parts(char).items():
             showing = [n for n in names if arm.pose.bones[n]["nirik_drawing"]]
             if not showing:

@@ -7,9 +7,8 @@ its half. Newest first; `(date)` marks when an item came up.
 
 ## Open
 
-### Make Nirik Flash-free
-Write into each puppet what Nirik currently infers from show conventions,
-so Nirik can stop guessing (2026-11-06):
+### Make Nirik Flash-free (done 2026-11-09, format version 2)
+The converter now writes what Nirik used to infer (conventions.py):
 - `parts`: the animator-facing groups (Mouth, Brow, Blink, Eye 1 = iris +
   pupil + highlights under one mask). Today Nirik reads layer names.
 - `label` per part and drawing: today Nirik strips rig codes (`PTS_`).
@@ -18,6 +17,15 @@ so Nirik can stop guessing (2026-11-06):
   rig has none; leave it out there.
 - Document the coordinate convention (y down, matrix a b c d tx ty) as the
   format's own.
+
+### Format version 2 follow-ups
+- Spike's walk head has no Eye groups: its eye layers are "Layer 294" etc.
+  under a mask named "Mask", so the name conventions miss them. Detect eye
+  groups from structure (layers under a mask, minus the mask's own shape)
+  (2026-11-09)
+- Symbol labels are raw ids: walk symbols show as
+  "Pwalk_wings_closed_Pwalk" in the panel. Write readable labels
+  (2026-11-09)
 
 ### Loops and fades
 - Mark looping sequences so Nirik can play them: which drawings, in what
