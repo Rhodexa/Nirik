@@ -93,6 +93,12 @@ Measured 2026-11-09: one pose of Twilight on screen ~49 MB of GPU tiles at
 - Stress test: load a real, busy show scene as puppets and measure.
 
 ## Ideas and side quests
+- **Scenes as symbols** (format spec section 9): a layer may hold a symbol
+  from another library, so a scene can be a symbol, a selection can be saved
+  as a symbol, libraries can borrow from each other, and a performance can
+  be reused as a symbol whose poses are its frames (2026-11-09)
+- **Tree view** of the current pose as the main way to navigate, with
+  groups beside it (2026-11-09)
 - **Vector drawings:** a drawing can be vector (e.g. Grease Pencil) instead
   of a raster, per part. Gains: sharp at any zoom, 10-15x smaller, editable
   in Blender. Not a gain for these files: constant line width when bending
