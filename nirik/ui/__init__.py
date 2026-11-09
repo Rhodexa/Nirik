@@ -248,7 +248,7 @@ class NIRIK_OT_select_part(bpy.types.Operator):
         return {"FINISHED"}
 
 
-_last_pick: dict = {}  # Alt+click cycling: position, stack under the cursor, index
+_last_pick: dict = {}  # last click: position, stack under the cursor, cycle index, selection before it
 
 
 class NIRIK_OT_pick(bpy.types.Operator):
@@ -286,19 +286,30 @@ class NIRIK_OT_pick(bpy.types.Operator):
             return {"PASS_THROUGH"}  # empty space: Blender's own selection
         stack = [h.slot for h in found]
 
+        slots = char.all_slots()
+        selected = {pb.name for pb in arm.pose.bones if pb.select and (pb.name == "ROOT" or pb.name in slots)}
+        near = abs(_last_pick.get("x", -99) - coord[0]) + abs(_last_pick.get("y", -99) - coord[1]) < 6
+        if self.mode == "EXACT" and near and "before" in _last_pick:
+            # A double-click arrives as press + double-click: undo what its
+            # first press selected (often the whole body) before picking.
+            selected = _last_pick["before"]
+        index = 0
         if self.mode == "CYCLE":
-            last = _last_pick
-            near = last.get("stack") == stack and abs(last["x"] - coord[0]) + abs(last["y"] - coord[1]) < 6
-            index = (last["index"] + 1) % len(stack) if near else 0
-            _last_pick.update(x=coord[0], y=coord[1], stack=stack, index=index)
-            names = [stack[index]]
-        elif self.mode == "EXACT":
-            names = [stack[0]]
-        else:
-            names = controls.part_for_slot(char, stack[0])
-        select_bones(arm, char, names, self.extend)
-        label = part_label(arm, char, stack[0]) if self.mode != "CYCLE" else part_label(arm, char, names[0])
-        self.report({"INFO"}, label if self.mode != "CYCLE" else f"{label} ({index + 1}/{len(stack)})")
+            index = (_last_pick.get("index", -1) + 1) if near and _last_pick.get("stack") == stack else 0
+        new = controls.pick(char, stack, self.mode, self.extend, selected, index)
+        _last_pick.clear()
+        _last_pick.update(x=coord[0], y=coord[1], stack=stack, index=index)
+        if self.mode != "EXACT":
+            _last_pick["before"] = selected
+        clicked = [n for n in (stack[index % len(stack)] if self.mode == "CYCLE" else None,
+                               *controls.part_for_slot(char, stack[0]), stack[0]) if n in new]
+        select_bones(arm, char, clicked[:1] + sorted(new - set(clicked[:1])))
+        shown = clicked[0] if clicked else stack[0]
+        label = part_label(arm, char, shown) if shown in slots and "nirik_drawing" in arm.pose.bones[shown] \
+            else ("Body" if shown == "ROOT" else shown)
+        if self.mode == "CYCLE":
+            label = f"{label} ({index % len(stack) + 1}/{len(stack)})"
+        self.report({"INFO"}, label if new else "Deselected")
         return {"FINISHED"}
 
 

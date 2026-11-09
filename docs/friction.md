@@ -92,6 +92,10 @@ at all (2026-11-09). Ideas, together:
   real-time from a microphone as a toy (2026-11-02)
 
 ## Fixed
+- Selecting Spike's arm pieces kept re-adding the whole body: a
+  double-click now undoes its own first press, Shift+click stays at the
+  level you're selecting at (exact pieces add exact pieces), and Shift+click
+  on a selected piece deselects it (2026-11-09).
 - Several puppets (or .blend files) of the same library repainted each
   other's texture tiles: palettes are shared per library now.
 - Importing your own art: Import Prop (pictures and sprite sheets).

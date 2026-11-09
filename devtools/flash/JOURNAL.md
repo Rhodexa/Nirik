@@ -44,9 +44,11 @@ so Nirik can stop guessing (2026-11-06):
   the most material (S08E13, S09E22).
 
 ### Rig structure
-- Hooves and similar sub-pieces are flattened into their leg drawings.
-  Promote nested pieces that move relative to their parent (the census saw
-  animators move hooves) to their own parts.
+- Hooves and similar sub-pieces are flattened into their leg drawings
+  (Twilight's legs: upper, lower, hoof, knee patch are one picture). Promote
+  nested pieces that move relative to their parent (the census saw
+  animators move hooves) to their own parts. This is about structure, not
+  raster vs vector: rasters can be split just as finely (2026-11-09)
 - Body hierarchy: the stock body rig is flat (legs, torso, neck are
   siblings). If Nirik gains "part carries part", the converter could write
   a default pony hierarchy.

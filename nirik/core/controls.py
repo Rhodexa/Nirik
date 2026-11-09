@@ -95,3 +95,33 @@ def part_for_slot(char: Character, slot: str) -> list[str]:
         if holder:
             return [holder]
     return [ROOT]
+
+
+def part_level_bones(char: Character) -> set[str]:
+    """Bones a plain click can select: main parts, rig carriers, the body."""
+    return main_bones(char) | {s.name for s in char.all_slots().values() if s.child_rig} | {ROOT}
+
+
+def pick(char: Character, stack: list[str], mode: str, extend: bool, selected: set[str],
+         cycle_index: int = 0) -> set[str]:
+    """New selection after clicking artwork whose pieces, front first, are `stack`.
+
+    mode: PART (the part you mean), EXACT (the piece itself), CYCLE (the
+    `cycle_index`-th piece). With `extend`, a click keeps the level of the
+    current selection: if it holds exact pieces (an upper arm), a plain
+    Shift+click adds exact pieces too instead of the whole body; clicking
+    something already selected deselects it.
+    """
+    if mode == "PART" and extend and selected and not selected <= part_level_bones(char):
+        mode = "EXACT"
+    if mode == "CYCLE":
+        target = [stack[cycle_index % len(stack)]]
+    elif mode == "EXACT":
+        target = [stack[0]]
+    else:
+        target = part_for_slot(char, stack[0])
+    if not extend:
+        return set(target)
+    if set(target) <= selected:
+        return selected - set(target)
+    return selected | set(target)

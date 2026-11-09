@@ -113,3 +113,20 @@ def test_far_color_is_the_common_darkening(tmp_path):
         ch.rigs["Head"].constructions[0].slots["Head.SKULL"].color = dark
     ch.rigs["Character"].constructions[0].slots["Character.Body"].color = dark
     assert ch.far_color() == dark
+
+
+def test_pick_keeps_the_level_and_toggles(tmp_path):
+    from nirik.core.controls import pick
+    ch = L.load(write_library(tmp_path))
+    stack = ["Head.SKULL", "Character.Body"]  # front first
+    # plain click: the part you mean
+    assert pick(ch, stack, "PART", False, set()) == {"Character.HEAD"}
+    # exact pieces selected: Shift+click adds exact pieces, not the carrier
+    sel = pick(ch, ["Character.Tail"], "EXACT", False, set())
+    assert sel == {"Character.Tail"}
+    assert pick(ch, stack, "PART", True, sel) == {"Character.Tail", "Head.SKULL"}
+    # part-level selection: Shift+click stays at part level
+    assert pick(ch, stack, "PART", True, {"ROOT"}) == {"ROOT", "Character.HEAD"}
+    # Shift+click on something selected deselects it
+    assert pick(ch, stack, "EXACT", True, {"Head.SKULL", "Character.Tail"}) == {"Character.Tail"}
+    assert pick(ch, stack, "CYCLE", False, set(), cycle_index=1) == {"Character.Body"}
