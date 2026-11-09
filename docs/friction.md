@@ -80,6 +80,20 @@ at all (2026-11-09). Ideas, together:
   shapes have any stroke; Spike 35%). Same limit the show had: redraw
   instead of stretching far (2026-11-09).
 
+### Stability
+- Blender crashed copying keys (Ctrl+C in the Dope Sheet) after a session
+  of auto-keyed construction steps, iris moves and blink swaps on an
+  appended Twilight. Crash was inside Blender (no Python running). Not
+  reproduced in a scripted session with two Twilights, 1,489 channels,
+  copy/paste/move and sync rebuilds. If it recurs, note the last few steps
+  (the crash report in /tmp lists recent operations) (2026-11-09)
+- Key bloat: one auto-keyed construction change keys every hidden socket
+  channel of the character (~70 layers x 20 channels), changed or not;
+  40 changes made 1,489 channels. Key only what changes between poses
+  (2026-11-09)
+- The hidden "tile" keys show next to Drawing keys in the Dope Sheet, so
+  they get selected, copied and moved with the animator's keys (2026-11-09)
+
 ### Memory
 Measured 2026-11-09: one pose of Twilight on screen ~49 MB of GPU tiles at
 4x resolution; a whole puppet 30-55 MB of PNGs on disk (as vectors ~2-3 MB).
