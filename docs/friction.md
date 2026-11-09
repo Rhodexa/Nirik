@@ -87,10 +87,6 @@ at all (2026-11-09). Ideas, together:
   reproduced in a scripted session with two Twilights, 1,489 channels,
   copy/paste/move and sync rebuilds. If it recurs, note the last few steps
   (the crash report in /tmp lists recent operations) (2026-11-09)
-- Key bloat: one auto-keyed construction change keys every hidden socket
-  channel of the character (~70 layers x 20 channels), changed or not;
-  40 changes made 1,489 channels. Key only what changes between poses
-  (2026-11-09)
 - The hidden "tile" keys show next to Drawing keys in the Dope Sheet, so
   they get selected, copied and moved with the animator's keys (2026-11-09)
 
@@ -130,6 +126,10 @@ Measured 2026-11-09: one pose of Twilight on screen ~49 MB of GPU tiles at
   real-time from a microphone as a toy (2026-11-02)
 
 ## Fixed
+- Key bloat: a construction change keyed every hidden channel of the
+  character. Now only changes are keyed, and channels that never change
+  get no curve: 40 pose changes went from 1,489 channels (~59,000 keys) to
+  522 channels (5,824 keys) (2026-11-09).
 - Appending a symbol from its library's .blend (or loading the same one
   twice): each copy works on its own (cards found through their armature,
   not by name) and copies share one set of textures (2026-11-09).

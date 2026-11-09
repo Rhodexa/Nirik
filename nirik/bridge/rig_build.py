@@ -523,49 +523,119 @@ def key_drawing(arm, slot: str, frame: int):
     make_constant(arm)
 
 
-def _apply_sockets(arm, char: L.Character, rig: str, construction: int, frame: int | None):
-    """Socket transforms and colors of one rig's slots (no drawings, no children)."""
-    upm = arm["nirik_units_per_meter"]
-    cons = char.rigs[rig].constructions[construction]
-    for s in char.rigs[rig].slots:
-        entry = cons.slots.get(s.name)
-        if entry is None:
-            continue
-        sock, skew = arm.pose.bones[f"{s.name}.SOCKET"], arm.pose.bones[f"{s.name}.SKEW"]
+def _socket_values(char: L.Character, rig: str, construction: int, upm: float):
+    """{(bone, path, index): value} for one pose of a rig: what its hidden
+    socket channels hold. Layers absent from the pose keep their last value."""
+    out = {}
+    for name, entry in char.rigs[rig].constructions[construction].slots.items():
         pair = L.socket_bones(L.to_plane(entry.matrix, upm))
-        sock.location = (pair.location[0], pair.location[1], 0)
-        sock.rotation_euler = (0, 0, pair.rot_a)
-        sock.scale = (pair.scale[0], pair.scale[1], 1)
-        skew.rotation_euler = (0, 0, pair.rot_b)
-        sock["nirik_color"] = list(entry.color or IDENTITY_COLOR)
-        if frame is not None:
-            for path in ("location", "rotation_euler", "scale", '["nirik_color"]'):
-                sock.keyframe_insert(path, frame=frame)
-            skew.keyframe_insert("rotation_euler", frame=frame)
+        sock, skew = f"{name}.SOCKET", f"{name}.SKEW"
+        out[(sock, "location", 0)], out[(sock, "location", 1)] = pair.location
+        out[(sock, "rotation_euler", 2)] = pair.rot_a
+        out[(sock, "scale", 0)], out[(sock, "scale", 1)] = pair.scale
+        out[(skew, "rotation_euler", 2)] = pair.rot_b
+        for i, v in enumerate(entry.color or IDENTITY_COLOR):
+            out[(sock, '["nirik_color"]', i)] = v
+    return out
+
+
+def _set_channel(arm, bone: str, path: str, index: int, value: float):
+    pb = arm.pose.bones[bone]
+    if path.startswith('["'):
+        prop = path[2:-2]
+        if hasattr(pb[prop], "__len__"):
+            values = list(pb[prop])
+            values[index] = value
+            pb[prop] = values
+        else:  # a single value, e.g. nirik_tile
+            pb[prop] = type(pb[prop])(value)
+    else:
+        getattr(pb, path)[index] = value
+
+
+def _apply_sockets(arm, char: L.Character, rig: str, construction: int):
+    """Set a rig's socket channels to one pose (no keys)."""
+    for (bone, path, index), value in _socket_values(char, rig, construction,
+                                                     arm["nirik_units_per_meter"]).items():
+        _set_channel(arm, bone, path, index, value)
+
+
+def _changes(keys: list[tuple[float, float]], eps: float = 1e-6) -> list[tuple[float, float]]:
+    """Keys sorted by frame, dropping those that repeat the previous value."""
+    out = []
+    for frame, value in sorted(keys):
+        if not out or abs(value - out[-1][1]) > eps:
+            out.append((frame, value))
+    return out
+
+
+def _write_channels(arm, bag, channels: dict):
+    """One stepped curve per channel that changes; channels holding a single
+    value get no curve, just that value."""
+    for (bone, path, index), keys in channels.items():
+        keys = _changes(keys)
+        if len(keys) == 1:
+            _set_channel(arm, bone, path, index, keys[0][1])
+            continue
+        data_path = f'pose.bones["{bone}"]{path}' if path.startswith("[") else f'pose.bones["{bone}"].{path}'
+        fc = bag.fcurves.new(data_path, index=index, group_name=bone)
+        fc.keyframe_points.add(len(keys))
+        for kp, (frame, value) in zip(fc.keyframe_points, keys):
+            kp.co = (frame, value)
+            kp.interpolation = "CONSTANT"
+        fc.update()
+
+
+def _key_if_changed(arm, pb, prop: str, frame: int, old, new):
+    """Key `prop` at `frame` only if it changes there. A first key after an
+    unkeyed stretch also pins the old value at the earliest Nirik key, so
+    frames before it keep showing what they showed."""
+    bag = _channelbag(arm)
+    path = f'pose.bones["{pb.name}"]["{prop}"]'
+    fc = bag.fcurves.find(path) if bag else None
+    if fc is not None:
+        has_key = any(abs(kp.co.x - frame) < 0.5 for kp in fc.keyframe_points)
+        if not has_key and abs(fc.evaluate(frame) - new) < 1e-6:
+            return
+        pb.keyframe_insert(f'["{prop}"]', frame=frame)
+        return
+    if old == new:
+        return
+    pb.keyframe_insert(f'["{prop}"]', frame=frame)
+    bag = _channelbag(arm)
+    first = min((kp.co.x for fc2 in bag.fcurves if '["nirik_construction"]' in fc2.data_path
+                 for kp in fc2.keyframe_points), default=frame)
+    if first < frame:
+        bag.fcurves.find(path).keyframe_points.insert(first, old).interpolation = "CONSTANT"
 
 
 def apply_construction(arm, char: L.Character, rig: str, construction: int, frame: int | None = None,
-                       children: bool = True):
+                       children: bool = True, _top: bool = True):
     """Pose a library construction: sockets, the stock drawings, and the child
-    rigs' paired constructions. With `frame`, everything is keyed there."""
+    rigs' paired constructions. With `frame`, the pose is keyed there: the
+    visible construction key, drawings that change, and (regenerated) only
+    the hidden socket channels that change."""
     control = arm.pose.bones[construction_bone(char, rig)]
     control["nirik_construction"] = construction
     if frame is not None:
         control.keyframe_insert('["nirik_construction"]', frame=frame)
-    _apply_sockets(arm, char, rig, construction, frame)
+    _apply_sockets(arm, char, rig, construction)
     cons = char.rigs[rig].constructions[construction]
     for s in char.rigs[rig].slots:
         entry = cons.slots.get(s.name)
         if s.child_rig:
             if children and entry is not None and entry.construction is not None:
-                apply_construction(arm, char, s.child_rig, entry.construction, frame)
+                apply_construction(arm, char, s.child_rig, entry.construction, frame, _top=False)
             continue
-        set_drawing(arm, char, s.name, entry.drawing if entry else 0)
+        pb = arm.pose.bones[s.name]
+        old, new = pb["nirik_drawing"], (entry.drawing if entry else 0)
+        set_drawing(arm, char, s.name, new)
         if frame is not None:
-            key_drawing(arm, s.name, frame)
-    if frame is not None:
-        make_constant(arm)
-    arm.update_tag()
+            _key_if_changed(arm, pb, "nirik_drawing", frame, old, new)
+    if _top:
+        if frame is not None:
+            rebuild_compiled(arm, char)
+        arm.update_tag()
 
 
 def _channelbag(arm):
@@ -591,8 +661,10 @@ def is_nirik(data_path: str) -> bool:
 
 
 def rebuild_compiled(arm, char: L.Character):
-    """Regenerate hidden channels from the visible ones, e.g. after retiming
-    construction or drawing keys in the Dope Sheet."""
+    """Regenerate hidden channels from the visible ones (after retiming
+    construction or drawing keys in the Dope Sheet). Only changes are keyed:
+    a socket channel that holds one value across all keyed poses gets no
+    curve at all."""
     bag = _channelbag(arm)
     if bag is None:
         return
@@ -601,14 +673,24 @@ def rebuild_compiled(arm, char: L.Character):
     for fc in [fc for fc in bag.fcurves if is_compiled(fc.data_path)]:
         bag.fcurves.remove(fc)
 
-    for rig in char.rigs:  # rigs in library order: parents before children
+    upm = arm["nirik_units_per_meter"]
+    channels: dict = {}
+    for rig in char.rigs:
         path = f'pose.bones["{construction_bone(char, rig)}"]["nirik_construction"]'
         for frame, value in authoring.get(path, []):
-            _apply_sockets(arm, char, rig, int(round(value)), int(round(frame)))
+            for channel, v in _socket_values(char, rig, int(round(value)), upm).items():
+                channels.setdefault(channel, []).append((frame, v))
     for slot in char.all_slots():
-        for frame, value in authoring.get(f'pose.bones["{slot}"]["nirik_drawing"]', []):
-            set_drawing(arm, char, slot, int(round(value)))
-            arm.pose.bones[slot].keyframe_insert('["nirik_tile"]', frame=int(round(frame)))
+        keys = authoring.get(f'pose.bones["{slot}"]["nirik_drawing"]', [])
+        tiles = [(frame, ensure_in_palette(char, slot, int(round(v))) if round(v) else -1)
+                 for frame, v in keys]
+        if tiles:
+            channels[(slot, '["nirik_tile"]', 0)] = tiles
+    _write_channels(arm, bag, channels)
+    for slot in char.all_slots():  # current tiles for unkeyed drawings
+        pb = arm.pose.bones[slot]
+        if pb.get("nirik_drawing") and not any(c[0] == slot for c in channels):
+            pb["nirik_tile"] = ensure_in_palette(char, slot, pb["nirik_drawing"])
     make_constant(arm)
     arm.update_tag()
 

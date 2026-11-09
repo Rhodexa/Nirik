@@ -43,6 +43,14 @@ def append(char: L.Character, scene=None):
     coll = dst.collections[0]
     scene.collection.children.link(coll)
     arm = next(o for o in coll.objects if "nirik_library" in o)
-    # Same steps as for a File > Append: library path, tiles, shared textures.
+    # It belongs to the library it was loaded from, even if the .blend was
+    # written elsewhere (a copied folder). Then the same steps as for a
+    # File > Append: tiles, shared textures.
+    arm["nirik_library"] = str(char.root)
+    for ob in coll.objects:
+        for slot in ob.material_slots:
+            for node in (slot.material.node_tree.nodes if slot.material and slot.material.node_tree else ()):
+                if node.type == "TEX_IMAGE" and node.image and "nirik_slot" in node.image:
+                    node.image["nirik_library"] = str(char.root)
     relink.adopt_new_puppets()
     return arm
