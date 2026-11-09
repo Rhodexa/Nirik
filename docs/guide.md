@@ -9,7 +9,8 @@ make demo CHAR=library/rarity      # Rarity
 
 Blender opens with the character in a front view and the **Nirik** tab in the
 sidebar (press `N` if it's hidden). In any other file: *Nirik tab → Load
-Character* and pick a folder under `library/`.
+Symbol* and pick a folder under `library/`, or use *File → Append* on the
+`.blend` inside that folder (open it, then `Collection → nirik:<name>`).
 
 ## The Nirik tab
 
@@ -117,7 +118,7 @@ expressions with Mouth/Brow/Blink swaps, then refine with transforms.
 
 ## Props
 
-*Nirik tab → Import Prop*: pick an image and its height. A sprite sheet
+*Nirik tab → Import Image*: pick an image and its height. A sprite sheet
 (separate pieces of art on one transparent image) becomes one prop whose
 drawings are the pieces, in reading order, centered on one canvas: swap them
 with the browser or Alt+Wheel like any part (Parts → **Art**). Single

@@ -39,6 +39,7 @@ panel.
 
 ```
 twilight/
+  twilight.blend         the assembled symbol: File > Append from here
   library.json           the description (this document)
   drawings/<id>.png      raster drawings
   drawings/<id>.svg      vector drawings (reserved, section 8)
@@ -47,6 +48,17 @@ twilight/
   .converter/            converter's own files; never read by Nirik
     ids.json             keeps drawing IDs stable across re-imports
 ```
+
+`<name>.blend` holds one collection, `nirik:<name>`, with everything the
+symbol needs. Nirik writes it the first time the library is loaded and
+rebuilds it when `library.json` is newer. **Load Symbol** appends from it;
+plain File > Append works too, and Nirik adopts the appended copy.
+
+**Collections are packaging, not structure.** A collection is a fixed box:
+the instance's armature, cards and helpers, which never change from frame
+to frame. The frame-by-frame tree lives in the poses, which decide what in
+the box shows, where and with which drawing. A symbol that looks entirely
+different on two frames has both arrangements in its box.
 
 Changes from today: `character.json` → `library.json`; `.udim/` →
 `.nirik/palettes/`; `ids.json` moves under `.converter/`.
@@ -129,8 +141,9 @@ These conventions happen to match Flash's; they are this format's own.
   "kind": "drawing",         // drawing | symbol | mask
   "canvas": [-48.5, -60.0, 40.25, 32.0],
   "masked_by": null,         // id of a mask layer in the same symbol
-  "symbol": null             // kind "symbol": the nested symbol ("Head", or
-                             // "rarity#Character" from another library, section 9)
+  "symbols": []              // kind "symbol": the symbols this layer can hold,
+                             // e.g. ["Head"] or ["StandBody", "WalkBody"]; each
+                             // pose says which one shows (and in which pose)
 }
 ```
 
@@ -142,7 +155,8 @@ These conventions happen to match Flash's; they are this format's own.
   "tags": ["view:3/4"],
   "layers": {
     "Head.MOUTH": { "drawing": 1347, "matrix": [1, 0, 0, 1, 12.5, 40.0] },
-    "Character.HEAD": { "pose": 4, "matrix": [0.98, 0.1, -0.1, 0.98, 0, -120],
+    "Character.HEAD": { "symbol": "Head", "pose": 4,
+                        "matrix": [0.98, 0.1, -0.1, 0.98, 0, -120],
                         "color": [1, 1, 1, 1, -16, -21, -16, 0] }
   }
 }
@@ -194,27 +208,19 @@ paths only, already on the layer's canvas). Nirik decides how to display it
 this gains sharpness and size, not constant line widths: their outlines
 are filled shapes.
 
-## 9. Open design: symbols across libraries, scenes as symbols
+## 9. Composition: in the scene, not between libraries
 
-In Flash a scene is itself a symbol whose layers hold instances of other
-symbols. With one addition, this format can do the same: a layer may hold a
-symbol from **another library**, written `"library#symbol"`
-(`"rarity#Character"`). That would allow:
+Decided 2026-11-09. Libraries never reference each other: a library that
+depends on another folder breaks when either moves.
 
-- **A scene as a symbol**: "Twilight and Rarity in the cockpit" as one
-  symbol you can place, nest, or reuse.
-- **Save selection as symbol**: pick instances in a scene and write them as
-  a new library whose root symbol references them.
-- **Borrowing**: a layer shows a symbol or drawings from another library
-  (another character's mouth; the standing head on a walk body).
-- **Reusing a performance**: a symbol whose poses are the frames of an
-  animation (Rainbow Dash's flying), played back like a loop. This is how
-  Flash's graphic symbols worked.
-
-Open questions here: how Blender represents a nested instance from another
-library (its own armature parented in, or bones merged into one); how
-references find libraries on another machine; and whether a saved
-performance is poses only or keeps its keys.
+- **Composing** happens in the Blender scene: Spike on Twilight is one
+  instance attached to another's layer. No format change.
+- **Saving a composition, a scene as a symbol, reusing a performance** use
+  Blender's own tools on collections and actions, revisited when needed.
+- **A layer switching between whole symbols** (standing body / walk body)
+  is in the format: a symbol layer lists every symbol it can hold
+  (section 6) and each pose says which one shows. That covers what "two
+  frames with entirely different rigs" needs within one library.
 
 ## 10. Rules
 
@@ -254,13 +260,16 @@ working. Nirik reads version 1 during the transition.
   add their own.
 - **Tags** as `key:value`, replacing the separate "set".
 - Scale is overridable per instance.
+- The library folder holds `<name>.blend`, appended into scenes;
+  collections are packaging, poses are structure.
+- No references between libraries; composition happens in scenes.
+- A symbol layer can hold one of several symbols.
 
 ## 13. Open questions
 
-1. **Section 9:** do we commit to cross-library symbols now (so the format
-   is ready for it), or keep a layer's symbol within its own library until
-   we build it?
-2. **Tree view**: the current pose's tree only, or also show layers that
-   are empty in this pose (so the aura is findable on the profile head)?
-3. **Groups made in a scene**: stored in the .blend only, or offered back
-   into the library so other scenes get them?
+1. **Tree view**: show only what the current pose uses, plus the empty
+   layers dimmed so pieces like the aura stay findable? And a pose browser
+   to bring a layer's content from another pose into the current one.
+2. **Groups made in a scene**: saved with the symbol by default, with a
+   "this file only" toggle (like Scratch's variables for one sprite or the
+   whole project)?

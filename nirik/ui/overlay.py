@@ -42,7 +42,7 @@ def artwork_corners(arm, char, bone: str, depsgraph) -> list[Vector]:
     corners = []
     for slot in rig_build.carried_slots(arm, char, bone):
         drawing = arm.pose.bones[slot]["nirik_drawing"]
-        card = bpy.data.objects.get(f"{char.name}:{slot}")
+        card = rig_build.card_of(arm, slot)
         box = artwork_uv_box(char, drawing) if drawing else None
         if card is None or box is None:
             continue

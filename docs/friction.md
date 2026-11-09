@@ -116,6 +116,9 @@ Measured 2026-11-09: one pose of Twilight on screen ~49 MB of GPU tiles at
   real-time from a microphone as a toy (2026-11-02)
 
 ## Fixed
+- Appending a symbol from its library's .blend (or loading the same one
+  twice): each copy works on its own (cards found through their armature,
+  not by name) and copies share one set of textures (2026-11-09).
 - Selecting Spike's arm pieces kept re-adding the whole body: a
   double-click now undoes its own first press, Shift+click stays at the
   level you're selecting at (exact pieces add exact pieces), and Shift+click

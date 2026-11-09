@@ -383,16 +383,16 @@ def test_layers_list_and_hiding():
     blink = next(s for s in rows if "BLINK" in s)
     bpy.ops.nirik.select_part(bones=blink)
     bpy.ops.nirik.hide(action="HIDE")
-    assert rig_build.card_of(char, blink).hide_get()
-    assert not rig_build.card_of(char, blink).hide_render  # viewport only
+    assert rig_build.card_of(arm, blink).hide_get()
+    assert not rig_build.card_of(arm, blink).hide_render  # viewport only
     origin = _artwork_point(arm, char, blink)
     dg = bpy.context.evaluated_depsgraph_get()
     assert blink not in [h.slot for h in picking.hits(arm, char, origin, Vector((0, 1, 0)), dg)]
     bpy.ops.nirik.hide(slot=blink, action="TOGGLE")
-    assert not rig_build.card_of(char, blink).hide_get()
+    assert not rig_build.card_of(arm, blink).hide_get()
     bpy.ops.nirik.hide(action="HIDE")
     bpy.ops.nirik.hide(action="SHOW_ALL")
-    assert not any(rig_build.card_of(char, s).hide_get() for s in rows)
+    assert not any(rig_build.card_of(arm, s).hide_get() for s in rows)
     arm.nirik_layer_index = list(arm.pose.bones).index(arm.pose.bones[rows[0]])
     assert arm.pose.bones[rows[0]].select
 
@@ -424,7 +424,7 @@ def test_depth_pushes_carried_parts_behind_and_extend_selects():
 
     def ys():
         bpy.context.view_layer.update()
-        return [rig_build.card_of(char, s).matrix_world.translation.y for s in head]
+        return [rig_build.card_of(arm, s).matrix_world.translation.y for s in head]
 
     before = ys()
     bpy.ops.nirik.depth(how="BACK")

@@ -60,8 +60,7 @@ def repair_palettes(arm, char: L.Character):
         for i, drawing in enumerate(pal):
             if not (folder / f"t.{1001 + i}.png").exists():  # missing, or dangling
                 rig_build._link_tile(char, slot, i, drawing)
-        image = bpy.data.images.get(f"nirik:{char.name}:{slot}")
-        if image is not None:
+        for image in rig_build.palette_images(char, slot):
             wanted = str(folder / "t.<UDIM>.png")
             if image.filepath != wanted:
                 image.filepath = wanted
@@ -78,15 +77,24 @@ def relink(arm) -> bool:
     found = find_library(arm["nirik_library"], bpy.data.filepath)
     if found is None:
         return False
+    old_root = arm["nirik_library"]
     arm["nirik_library"] = str(found.resolve())
-    repair_palettes(arm, L.load(found))
+    char = L.load(found)
+    for im in bpy.data.images:  # textures remember their library too
+        if im.get("nirik_library") == old_root:
+            im["nirik_library"] = str(char.root)
+    rig_build.tag_legacy(arm, char)
+    repair_palettes(arm, char)
     return True
 
 
 @persistent
 def on_load(_filepath):
+    _adopted.clear()
     lost = [ob.name for ob in bpy.data.objects
             if ob.type == "ARMATURE" and "nirik_library" in ob and not relink(ob)]
+    _adopted.update(ob.session_uid for ob in bpy.data.objects if "nirik_library" in ob)
+    share_textures()
     if lost:
         print(f"Nirik: library not found for {', '.join(lost)}; use Load Character or move it back")
 
@@ -98,3 +106,35 @@ def register():
 def unregister():
     if on_load in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(on_load)
+
+
+def share_textures():
+    """Copies of one puppet (File > Append twice) bring their own textures;
+    point every copy at one texture per library layer so GPU memory isn't
+    doubled. Safe to run any time."""
+    keep: dict[tuple[str, str], bpy.types.Image] = {}
+    for image in list(bpy.data.images):
+        key = (image.get("nirik_library"), image.get("nirik_slot"))
+        if None in key or image.library is not None:
+            continue
+        if key in keep:
+            image.user_remap(keep[key])
+            bpy.data.images.remove(image)
+        else:
+            keep[key] = image
+
+
+_adopted: set[int] = set()  # session_uid of puppets already checked this session
+
+
+def adopt_new_puppets() -> bool:
+    """Make newly appended puppets valid: library path, tiles, shared
+    textures. Returns whether anything was new."""
+    new = [ob for ob in bpy.data.objects
+           if ob.type == "ARMATURE" and "nirik_library" in ob and ob.session_uid not in _adopted]
+    for ob in new:
+        _adopted.add(ob.session_uid)
+        relink(ob)
+    if new:
+        share_textures()
+    return bool(new)

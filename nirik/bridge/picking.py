@@ -14,6 +14,7 @@ import numpy as np
 from mathutils import Vector, geometry
 
 from ..core import library as L
+from . import rig_build
 
 ALPHA_HIT = 0.3          # clicks on faint antialiasing pass through
 ALPHA_MAX_SIZE = 256     # alpha copies are downsampled to this many pixels
@@ -76,7 +77,7 @@ def _card_uv(card, depsgraph, origin: Vector, direction: Vector):
 
 
 def _mask_alpha(arm, char: L.Character, mask_slot: str, point: Vector, depsgraph) -> float:
-    empty = bpy.data.objects.get(f"nirik:{char.name}:{mask_slot}")
+    empty = rig_build.mask_empty(arm, mask_slot)
     drawing = arm.pose.bones[mask_slot]["nirik_drawing"]
     if empty is None or not drawing:
         return 1.0  # an empty mask layer masks nothing
@@ -89,7 +90,7 @@ def hits(arm, char: L.Character, origin: Vector, direction: Vector, depsgraph) -
     order = {name: i for i, name in enumerate(char.draw_order())}
     found = []
     for name, i in order.items():
-        card = bpy.data.objects.get(f"{char.name}:{name}")
+        card = rig_build.card_of(arm, name)
         drawing = arm.pose.bones[name]["nirik_drawing"]
         if card is None or not drawing or card.hide_get() or card.hide_viewport:
             continue

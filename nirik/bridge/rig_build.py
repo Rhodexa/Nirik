@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 import bpy
@@ -100,21 +101,30 @@ def ensure_in_palette(char: L.Character, slot: str, drawing: int) -> int:
     pal.append(drawing)
     _write_palette(char, slot, pal)
     tile = _link_tile(char, slot, len(pal) - 1, drawing)
-    image = bpy.data.images.get(f"nirik:{char.name}:{slot}")
-    if image is not None:
+    for image in palette_images(char, slot):  # every copy, e.g. a second appended puppet
         if not image.tiles.get(tile):
             image.tiles.new(tile_number=tile)
         image.reload()
     return len(pal) - 1
 
 
+def palette_images(char: L.Character, slot: str) -> list:
+    """Texture datablocks showing `slot` of this library. Found by tag, not
+    name: appending a puppet twice gives the second copy renamed images."""
+    root = str(char.root)
+    return [im for im in bpy.data.images
+            if im.get("nirik_library") == root and im.get("nirik_slot") == slot]
+
+
 def palette_image(char: L.Character, slot: str) -> bpy.types.Image:
-    name = f"nirik:{char.name}:{slot}"
-    image = bpy.data.images.get(name)
+    found = palette_images(char, slot)
+    image = found[0] if found else None
     if image is None:
         folder = palette_dir(char, slot)
         image = bpy.data.images.load(str(folder / "t.1001.png"), check_existing=False)
-        image.name = name
+        image.name = f"nirik:{char.name}:{slot}"
+        image["nirik_library"] = str(char.root)
+        image["nirik_slot"] = slot
         image.source = "TILED"
         image.filepath = str(folder / "t.<UDIM>.png")
         image.alpha_mode = "STRAIGHT"
@@ -406,6 +416,7 @@ def build(char: L.Character, collection=None, units_per_meter: float = UNITS_PER
             empty.location = (x0 / units_per_meter, -y1 / units_per_meter - BONE_LENGTH, 0)
             empty.scale = ((x1 - x0) / units_per_meter, (y1 - y0) / units_per_meter, 1)
             empty.hide_select = True
+            empty["nirik_mask"] = s.name
             mask_empties[s.name] = empty
 
     far = char.far_color() or IDENTITY_COLOR
@@ -424,6 +435,7 @@ def build(char: L.Character, collection=None, units_per_meter: float = UNITS_PER
         for loop, co in zip(uv.data, ((0, 0), (1, 0), (1, 1), (0, 1))):
             loop.uv = co
         card = bpy.data.objects.new(f"{char.name}:{name}", mesh)
+        card["nirik_slot"] = name
         coll.objects.link(card)
         card.parent = arm
         _drive(card, "location", 1, arm, name, "nirik_layer",
@@ -622,7 +634,7 @@ def carried_slots(arm, char: L.Character, bone: str) -> list[str]:
 
 
 def effective_order(arm, char: L.Character, slot: str) -> float:
-    card = bpy.data.objects.get(f"{char.name}:{slot}")
+    card = card_of(arm, slot)
     return card["nirik_order"] + arm.pose.bones[slot]["nirik_layer"] if card else 0.0
 
 
@@ -674,14 +686,37 @@ def stack(arm, char: L.Character) -> list[str]:
     return sorted(shown, key=lambda s: -effective_order(arm, char, s))
 
 
-def card_of(char: L.Character, slot: str):
-    return bpy.data.objects.get(f"{char.name}:{slot}")
+def card_of(arm, slot: str):
+    """The card showing `slot` on this puppet, found through the armature (not
+    by name: a second appended copy has renamed objects)."""
+    return next((ob for ob in arm.children if ob.get("nirik_slot") == slot), None)
 
 
-def set_hidden(char: L.Character, slots, hidden: bool):
+def mask_empty(arm, slot: str):
+    return next((ob for ob in arm.children if ob.get("nirik_mask") == slot), None)
+
+
+def tag_legacy(arm, char: L.Character):
+    """Scenes from before tags: recognize cards, mask helpers and textures by
+    their original names ("twilight:Head.MOUTH", maybe with ".001")."""
+    slots = char.all_slots()
+    for ob in arm.children:
+        base = re.sub(r"\.\d{3}$", "", ob.name)
+        if "nirik_slot" not in ob and "nirik_mask" not in ob:
+            if base.startswith(f"nirik:{char.name}:") and base.split(":", 2)[2] in slots:
+                ob["nirik_mask"] = base.split(":", 2)[2]
+            elif base.startswith(f"{char.name}:") and base.split(":", 1)[1] in slots:
+                ob["nirik_slot"] = base.split(":", 1)[1]
+    for im in bpy.data.images:
+        base = re.sub(r"\.\d{3}$", "", im.name)
+        if "nirik_slot" not in im and base.startswith(f"nirik:{char.name}:"):
+            im["nirik_library"], im["nirik_slot"] = str(char.root), base.split(":", 2)[2]
+
+
+def set_hidden(arm, slots, hidden: bool):
     """Viewport-only hiding (renders unaffected), e.g. hide a blink to pose the eye."""
     for s in slots:
-        card = card_of(char, s)
+        card = card_of(arm, s)
         if card is not None:
             card.hide_set(hidden)
 

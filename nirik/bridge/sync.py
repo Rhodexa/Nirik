@@ -60,10 +60,29 @@ def _run(name: str):
     return None
 
 
+_adopt_pending = False
+
+
+def _adopt():
+    global _adopt_pending
+    _adopt_pending = False
+    from . import relink
+    relink.adopt_new_puppets()
+    return None
+
+
 @persistent
 def on_depsgraph_update(scene, depsgraph):
+    global _adopt_pending
     if not any(isinstance(u.id, (bpy.types.Action, bpy.types.Object)) for u in depsgraph.updates):
         return
+    # File > Append has no notification: a puppet we haven't seen gets adopted
+    # (library path, tiles, shared textures) on a timer, outside the handler.
+    from . import relink
+    if not _adopt_pending and any("nirik_library" in ob and ob.session_uid not in relink._adopted
+                                  for ob in scene.objects if ob.type == "ARMATURE"):
+        _adopt_pending = True
+        bpy.app.timers.register(_adopt, first_interval=0.1)
     for ob in scene.objects:
         if ob.type == "ARMATURE" and "nirik_library" in ob and ob.name not in _pending:
             ob = ob.original

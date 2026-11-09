@@ -4,7 +4,7 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
 from bpy_extras import view3d_utils
 
-from ..bridge import picking, props, relink, rig_build, sync
+from ..bridge import picking, props, puppet_file, relink, rig_build, sync
 from ..core import controls, library
 from . import overlay
 
@@ -63,9 +63,10 @@ def autokey_frame(context) -> int | None:
 
 
 class NIRIK_OT_load_character(bpy.types.Operator):
-    """Build a puppet from a Nirik character library folder"""
+    """Place a symbol from a library folder (appended from the library's .blend;
+    built and saved there on first use)"""
     bl_idname = "nirik.load_character"
-    bl_label = "Load Character"
+    bl_label = "Load Symbol"
     bl_options = {"REGISTER", "UNDO"}
 
     directory: StringProperty(subtype="DIR_PATH")
@@ -96,8 +97,12 @@ def load_and_select(context, char):
     _characters[str(char.root)] = char
     if context.mode != "OBJECT":
         bpy.ops.object.mode_set(mode="OBJECT")
-    arm = rig_build.build(char)
-    rig_build.apply_construction(arm, char, char.root_rig, 0)
+    if puppet_file.is_current(char):
+        arm = puppet_file.append(char)  # same as File > Append from the library's .blend
+    else:
+        arm = rig_build.build(char)
+        rig_build.apply_construction(arm, char, char.root_rig, 0)
+        puppet_file.write(arm, char)
     sync.mark_synced(arm)
     for ob in context.selected_objects:
         ob.select_set(False)
@@ -107,9 +112,9 @@ def load_and_select(context, char):
 
 
 class NIRIK_OT_import_prop(bpy.types.Operator):
-    """Turn an image (or a sprite sheet of separate pieces) into a prop"""
+    """Turn an image (or a sprite sheet of separate pieces) into a symbol"""
     bl_idname = "nirik.import_prop"
-    bl_label = "Import Prop"
+    bl_label = "Import Image"
     bl_options = {"REGISTER", "UNDO"}
 
     filepath: StringProperty(subtype="FILE_PATH")
@@ -368,7 +373,7 @@ class NIRIK_PT_main(bpy.types.Panel):
         arm = nirik_armature(context)
         char = character_for(arm)
         if char is None:
-            layout.label(text="Select a Nirik character")
+            layout.label(text="Select a Nirik symbol")
             return
 
         box = layout.box()
@@ -562,13 +567,13 @@ class NIRIK_OT_hide(bpy.types.Operator):
         arm = nirik_armature(context)
         char = character_for(arm)
         if self.action == "SHOW_ALL":
-            rig_build.set_hidden(char, char.draw_order(), False)
+            rig_build.set_hidden(arm, char.draw_order(), False)
         elif self.slot:
-            card = rig_build.card_of(char, self.slot)
-            rig_build.set_hidden(char, [self.slot], not card.hide_get())
+            card = rig_build.card_of(arm, self.slot)
+            rig_build.set_hidden(arm, [self.slot], not card.hide_get())
         else:
             parts = {s for b in selected_controls(arm, char) for s in rig_build.carried_slots(arm, char, b)}
-            rig_build.set_hidden(char, parts, True)
+            rig_build.set_hidden(arm, parts, True)
         redraw_viewports(context)
         return {"FINISHED"}
 
@@ -579,7 +584,7 @@ class NIRIK_UL_layers(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         arm = data.id_data
         char = character_for(arm)
-        card = rig_build.card_of(char, item.name)
+        card = rig_build.card_of(arm, item.name)
         hidden = card is not None and card.hide_get()
         row = layout.row(align=True)
         op = row.operator("nirik.hide", text="", icon="HIDE_ON" if hidden else "HIDE_OFF", emboss=False)
