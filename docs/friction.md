@@ -24,12 +24,14 @@ first within each section; `(date)` marks when an item came up.
   library is copied elsewhere, sent to another machine, or rendered on a
   farm? Relinking covers renamed project folders, not copies. Probably
   wants a "pack for render" (2026-11-09)
-- Can't borrow from other puppets: show a drawing, or put a whole part,
-  from another puppet (another character's mouth, a standing head on a walk
-  body) (2026-11-09)
+- Swap limits: Stack, Depth and Side on a layer don't reach what's swapped
+  onto it; the layer's mask doesn't apply to it; removing a swap is manual
+  (delete its armature and cards); the Swap list has no pictures
+  (2026-11-10)
 - A puppet can't be both standing and walking: stopping at the mailbox means
-  swapping puppets mid-shot. Want: a puppet with several cycles and its
-  standing poses, switched by pose.
+  swapping puppets mid-shot. Swap covers heads and parts, not the body
+  itself (the root isn't a layer). Wants the scene as a symbol, so a whole
+  character sits on a layer that can swap.
 
 ### Poses are cages
 A puppet is a tree: each symbol has its own frames, each frame its own
@@ -108,7 +110,10 @@ Measured 2026-11-09: one pose of Twilight on screen ~49 MB of GPU tiles at
   as a symbol, libraries can borrow from each other, and a performance can
   be reused as a symbol whose poses are its frames (2026-11-09)
 - **Tree view** of the current pose as the main way to navigate, with
-  groups beside it (2026-11-09)
+  groups beside it (2026-11-09). Pose pictures are cheap: a contact sheet
+  of Twilight's 55 head poses renders in about 30 s from the tiles already
+  on disk (`out/experiments/twilight_head_poses.png`) and finds the profile
+  pose at a glance, which the pose numbers never did (2026-11-10)
 - **Vector drawings:** a drawing can be vector (e.g. Grease Pencil) instead
   of a raster, per part. Gains: sharp at any zoom, 10-15x smaller, editable
   in Blender. Not a gain for these files: constant line width when bending
@@ -123,6 +128,12 @@ Measured 2026-11-09: one pose of Twilight on screen ~49 MB of GPU tiles at
   real-time from a microphone as a toy (2026-11-02)
 
 ## Fixed
+- Couldn't put anything from outside a symbol on its layers: a walk kept
+  its imported head, Twilight couldn't wear Rarity's head. Now Swap Symbol
+  (`Shift+Alt+D`) shows any symbol of any library on any layer from a
+  frame on, keyed, moving with the layer, drawn at its place in the stack;
+  nothing keyed before changes. Measured: a head swap builds in 0.3 s;
+  two puppets play at 3 ms per frame (2026-11-10).
 - First Load Symbol after the format upgrade failed once per library and
   left a half-built puppet (armature + one dark card); Rarity then couldn't
   load at all. The cache move broke every relative tile link, and a rebuild

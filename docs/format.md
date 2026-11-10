@@ -217,6 +217,10 @@ depends on another folder breaks when either moves.
 
 - **Composing** happens in the Blender scene: Spike on Twilight is one
   instance attached to another's layer. No format change.
+- **Swapping** (implemented 2026-11-10): any layer of a placed symbol can
+  show any symbol of any library from some frame on. The scene records
+  the swapped-in instance's library folder and symbol id; libraries still
+  never point at each other.
 - **Saving a composition, a scene as a symbol, reusing a performance** use
   Blender's own tools on collections and actions, revisited when needed.
 - **A layer switching between whole symbols** (standing body / walk body)

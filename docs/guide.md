@@ -90,6 +90,26 @@ Children follow their parent (the head carries eyes, mouth, mane). `Alt+G`,
 | `Alt + Wheel` | the current set (e.g. the 3/4 mouth chart) |
 | `Ctrl + Alt + Wheel` | everything the part can show (other angles too) |
 
+## Swapping symbols
+
+Any layer can show another symbol from some frame on: Rarity's head on
+Twilight, the standing head on a walk, a whole character where a tail was.
+Click the layer (for a head, the head), go to the frame, press
+`Shift+Alt+D` (or **Swap** in the Nirik tab) and pick from the list: every
+symbol of every library next to this one, plus what the layer showed
+before. With auto-key on, the swap is keyed and earlier frames keep what
+they showed. Pick the layer's own content (first in the list) to swap back.
+
+The swapped-in symbol is its own armature hanging from the layer, in Pose
+mode together with the one it's on: click it to pose it, step its poses,
+swap its drawings. It moves with the layer, and nothing keyed before
+changes. The Nirik tab says what a layer shows (*Shows:*).
+
+Not yet: Stack, Depth and Side on the layer don't reach the swapped-in
+symbol, the layer's mask doesn't apply to it, and removing a swap means
+deleting its armature with its cards. Riggers sometimes keep part of a head
+on the body (Twilight's ear): those parts stay.
+
 ## Animating
 
 1. Turn on **auto-key** (record button in the Timeline).
@@ -140,6 +160,10 @@ slides Body at the walk's speed, measured from the cycle so the feet stay
 planted (*Speed %* corrects any sliding). The head isn't touched: swap
 mouths, blink and turn it on top as usual. Both side walks face left.
 
+To walk with the full standing head (all its mouths, brows and poses):
+click the walk's head, *Swap* → *twilight › Head*, then step the swapped-in
+head to a profile pose (pose 10 for Twilight; the side walks face left).
+
 Import another walk from a scene file:
 
 ```
@@ -160,6 +184,6 @@ View Transform* to *Standard* to see the model colors exactly.
 
 ## Not there yet
 
-- A thumbnail browser for drawings (stepping only, for now).
+- A thumbnail browser for drawings and poses, and pictures in the Swap list.
 - Per-part "animate on twos" settings, lip sync, the X-sheet overlay.
 - Custom replacement drawings (Rarity's captain shirt).

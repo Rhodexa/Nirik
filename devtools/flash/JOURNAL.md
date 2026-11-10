@@ -39,6 +39,12 @@ The converter now writes what Nirik used to infer (conventions.py):
   converter should split it out (2026-11-09)
 
 ### Walk cycles
+- The walk's head sits in a wrapper symbol (`walk_head`) whose origin is
+  ~130 units from the head's: swapping the outer layer drops a head about
+  40 cm. Nirik's Swap works on the inner layer. Dropping the wrapper (and
+  its 214 poses of the source shot's acting) would remove the trap; the
+  wrapper's first 24 poses hold the head bob, which would move to the
+  body's placement of the head (2026-11-10)
 - Walk libraries are heavy: most of it is the source shot's head
   performance (Twilight's side walk: 1,538 drawings, ~300 for the body
   loop). Import the body loop only, and attach the character's own standing
