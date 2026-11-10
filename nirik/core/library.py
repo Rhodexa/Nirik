@@ -60,6 +60,7 @@ class Rig:
     name: str
     slots: list[Slot]                 # back to front
     constructions: list[Construction]
+    label: str = ""                   # display name
 
     def slot(self, name: str) -> Slot:
         return next(s for s in self.slots if s.name == name)
@@ -124,6 +125,57 @@ class Character:
         walk(self.root_rig)
         return out
 
+    def order_span(self, slot: str) -> tuple[int, int]:
+        """Where a layer sits in draw_order(): (index of its first drawing,
+        how many it holds). A symbol layer holds its whole nested stack; an
+        empty layer holds none and sits before the drawing at `index`."""
+        spans: dict[str, tuple[int, int]] = {}
+        count = 0
+
+        def walk(rig: str):
+            nonlocal count
+            for s in self.rigs[rig].slots:
+                first = count
+                if s.child_rig:
+                    walk(s.child_rig)
+                elif not s.mask and s.canvas:
+                    count += 1
+                spans[s.name] = (first, count - first)
+
+        walk(self.root_rig)
+        return spans[slot]
+
+    def symbols_below(self, rig: str) -> list[str]:
+        """`rig` and every symbol nested in it, outermost first."""
+        out: list[str] = []
+
+        def walk(r: str):
+            if r in out:
+                return
+            out.append(r)
+            for s in self.rigs[r].slots:
+                if s.child_rig:
+                    walk(s.child_rig)
+
+        walk(rig)
+        return out
+
+    def subtree(self, rig: str) -> Character:
+        """The library seen from one of its symbols: `rig` becomes the root,
+        with only what is nested in it (a head without its body). Everything
+        else (folder, drawings, textures) stays the library's own."""
+        if rig == self.root_rig:
+            return self
+        keep = self.symbols_below(rig)
+        slots = {s.name for r in keep for s in self.rigs[r].slots}
+        groups = [(label, [l for l in layers if l in slots]) for label, layers in self.groups]
+        return Character(
+            root=self.root, name=self.name, ppu=self.ppu, root_rig=rig,
+            rigs={r: self.rigs[r] for r in keep},
+            drawings={i: d for i, d in self.drawings.items() if d.slot in slots},
+            cycle=None, groups=[(label, layers) for label, layers in groups if layers],
+            far=self.far, units_per_meter=self.units_per_meter, label=self.label)
+
 
 def description(root: Path) -> Path:
     """The library's description file: library.json, or version 1's."""
@@ -165,7 +217,7 @@ def _load_v2(root: Path, data: dict) -> Character:
             labels = [pose["label"]] if pose.get("label") else []
             poses.append(Construction(id=i, labels=labels + pose.get("tags", []),
                                       frames=pose.get("frames", []), slots=entries))
-        rigs[sid] = Rig(sid, slots, poses)
+        rigs[sid] = Rig(sid, slots, poses, sym.get("label", sid))
         if sid == data["root"] and sym.get("cycle"):
             first, last = sym["cycle"]["poses"]
             cycle = {"frames": last - first + 1, "speed": sym["cycle"].get("speed")}

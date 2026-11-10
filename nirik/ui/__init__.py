@@ -4,7 +4,7 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
 from bpy_extras import view3d_utils
 
-from ..bridge import picking, props, puppet_file, relink, rig_build, sync
+from ..bridge import picking, props, puppet_file, relink, rig_build, swap, sync
 from ..core import controls, library
 from . import overlay
 
@@ -12,9 +12,18 @@ _characters: dict[str, library.Character] = {}  # disposable cache: library path
 
 
 def character_for(arm) -> library.Character | None:
+    """The library an instance was built from, seen from its symbol (a
+    swapped-in head is its library's head alone)."""
     path = arm.get("nirik_library") if arm else None
     if not path:
         return None
+    char = library_at(path)
+    symbol = arm.get("nirik_symbol")
+    return char.subtree(symbol) if symbol and symbol in char.rigs else char
+
+
+def library_at(path) -> library.Character:
+    path = str(path)
     if path not in _characters:
         _characters[path] = library.load(path)
     return _characters[path]
@@ -260,6 +269,111 @@ class NIRIK_OT_select_part(bpy.types.Operator):
 _last_pick: dict = {}  # last click: position, stack under the cursor, cycle index, selection before it
 
 
+def libraries_near(arm) -> list[library.Character]:
+    """Libraries to swap from: the folders next to this instance's library,
+    and every library already used in the file."""
+    roots = []
+    for folder in sorted(Path(arm["nirik_library"]).parent.iterdir()):
+        if folder.is_dir() and library.description(folder).exists():
+            roots.append(str(folder.resolve()))
+    for ob in bpy.data.objects:
+        if swap.is_instance(ob) and ob["nirik_library"] not in roots:
+            roots.append(ob["nirik_library"])
+    out = []
+    for root in roots:
+        try:
+            out.append(library_at(root))
+        except Exception as exc:  # a broken folder shouldn't hide the others
+            print(f"Nirik: skipping {root}: {exc}")
+    return out
+
+
+def swap_label(arm, char, bone: str, index: int) -> str:
+    if index == 0:
+        return "its own" if bone not in char.all_slots() else f"{char.all_slots()[bone].label} (own)"
+    for ob in swap.swapped_in(arm, bone):
+        if ob[swap.INDEX] == index:
+            sub = character_for(ob)
+            return f"{sub.label or sub.name} › {sub.rigs[sub.root_rig].label or sub.root_rig}"
+    return f"#{index} (missing)"
+
+
+_swap_items_cache: list = []  # Blender needs the strings kept alive
+
+
+def _swap_items(self, context):
+    arm = nirik_armature(context)
+    pb = context.active_pose_bone
+    _swap_items_cache.clear()
+    if arm is None or pb is None:
+        return _swap_items_cache
+    char = character_for(arm)
+    _swap_items_cache.append(("0", swap_label(arm, char, pb.name, 0), "The layer's own content"))
+    taken = set()
+    for ob in swap.swapped_in(arm, pb.name):
+        taken.add((ob["nirik_library"], ob.get(swap.SYMBOL)))
+        _swap_items_cache.append((str(ob[swap.INDEX]), swap_label(arm, char, pb.name, ob[swap.INDEX]),
+                                  "Swapped onto this layer earlier"))
+    for lib in libraries_near(arm):
+        for rig in lib.rigs.values():
+            if (str(lib.root), rig.name) in taken:
+                continue
+            n = len(rig.constructions)
+            _swap_items_cache.append((f"new|{lib.root}|{rig.name}",
+                                      f"{lib.label or lib.name} › {rig.label or rig.name}",
+                                      f"{n} pose{'s' if n != 1 else ''}, from {lib.root.name}"))
+    return _swap_items_cache
+
+
+class NIRIK_OT_swap(bpy.types.Operator):
+    """Show another symbol on this layer from the current frame on: any
+    symbol of any library (a head, a whole character, a leg). Its own
+    content comes back by choosing it again. Nothing already keyed changes"""
+    bl_idname = "nirik.swap"
+    bl_label = "Swap Symbol"
+    bl_options = {"REGISTER", "UNDO"}
+    bl_property = "target"
+
+    target: EnumProperty(name="Symbol", items=_swap_items)
+
+    @classmethod
+    def poll(cls, context):
+        arm = nirik_armature(context)
+        pb = context.active_pose_bone
+        return (arm is not None and context.mode == "POSE" and pb is not None
+                and pb.name in character_for(arm).all_slots())
+
+    def invoke(self, context, event):
+        context.window_manager.invoke_search_popup(self)
+        return {"RUNNING_MODAL"}
+
+    def execute(self, context):
+        host = nirik_armature(context)
+        bone = context.active_pose_bone.name
+        char = character_for(host)
+        if self.target.startswith("new|"):
+            _, root, symbol = self.target.split("|", 2)
+            others = [ob for ob in context.objects_in_mode if ob is not host]
+            bpy.ops.object.mode_set(mode="OBJECT")
+            try:
+                inst = swap.swap_in(host, char, bone, library_at(root), symbol)
+            finally:
+                for ob in context.view_layer.objects:
+                    ob.select_set(False)
+                for ob in others + [host]:
+                    ob.select_set(True)
+                context.view_layer.objects.active = host
+            inst.select_set(True)
+            bpy.ops.object.mode_set(mode="POSE")  # the new head is posable right away
+            index = inst[swap.INDEX]
+        else:
+            index = int(self.target)
+        swap.show(host, bone, index, autokey_frame(context))
+        self.report({"INFO"}, f"{char.all_slots()[bone].label}: {swap_label(host, char, bone, index)}")
+        redraw_viewports(context)
+        return {"FINISHED"}
+
+
 class NIRIK_OT_pick(bpy.types.Operator):
     """Select the part under the cursor by clicking its artwork"""
     bl_idname = "nirik.pick"
@@ -284,15 +398,29 @@ class NIRIK_OT_pick(bpy.types.Operator):
         select = getattr(prefs, "select_mouse", "LEFT") if prefs else "LEFT"
         if event.type != f"{select}MOUSE":
             return {"PASS_THROUGH"}
-        arm = nirik_armature(context)
-        char = character_for(arm)
         coord = (event.mouse_region_x, event.mouse_region_y)
         rv3d = context.region_data
         origin = view3d_utils.region_2d_to_origin_3d(context.region, rv3d, coord)
         direction = view3d_utils.region_2d_to_vector_3d(context.region, rv3d, coord)
-        found = picking.hits(arm, char, origin, direction, context.evaluated_depsgraph_get())
-        if not found:
+        depsgraph = context.evaluated_depsgraph_get()
+        # Every symbol in Pose mode can be clicked (a swapped-in head on its
+        # body): the nearest artwork decides which one becomes active.
+        best = None
+        for ob in [nirik_armature(context)] + [o for o in context.objects_in_mode if swap.is_instance(o)]:
+            hits = picking.hits(ob, character_for(ob), origin, direction, depsgraph)
+            if hits and (best is None or hits[0].depth < best[1][0].depth):
+                best = (ob, hits)
+        if best is None:
             return {"PASS_THROUGH"}  # empty space: Blender's own selection
+        arm, found = best
+        char = character_for(arm)
+        if arm is not context.view_layer.objects.active:
+            context.view_layer.objects.active = arm
+            if not self.extend:
+                for ob in context.objects_in_mode:
+                    if ob is not arm and ob.type == "ARMATURE":
+                        for pb in ob.pose.bones:
+                            pb.select = False
         stack = [h.slot for h in found]
 
         slots = char.all_slots()
@@ -403,7 +531,7 @@ class NIRIK_PT_main(bpy.types.Panel):
             # Blender value; change it with the arrows (typing skips the rig).
             sub = row.row(align=True)
             sub.enabled = False
-            sub.prop(control, '["nirik_construction"]', text=f"{rig.name} Pose")
+            sub.prop(control, '["nirik_construction"]', text=f"{rig.label or rig.name} Pose")
             op = row.operator("nirik.step_construction", text="", icon="TRIA_RIGHT")
             op.rig, op.step = rig.name, 1
             labels = ", ".join(rig.constructions[cid].labels)
@@ -427,6 +555,10 @@ class NIRIK_PT_main(bpy.types.Panel):
         box.label(text=part_label(arm, char, slot) if drawable else
                   ("Body" if pb.name == "ROOT" else char.all_slots()[pb.name].child_rig or pb.name),
                   icon="BONE_DATA")
+        if pb.name != "ROOT":
+            row = box.row(align=True)
+            row.label(text=f"Shows: {swap_label(arm, char, pb.name, swap.showing(arm, pb.name))}")
+            row.operator("nirik.swap", text="Swap", icon="FILE_REFRESH")
 
         # Layer and side act on everything the selection carries.
         row = box.row(align=True)
@@ -773,7 +905,7 @@ class NIRIK_PT_more(bpy.types.Panel):
                 op.bones = name
 
 
-classes = (NIRIK_OT_load_character, NIRIK_OT_import_prop, NIRIK_OT_face_camera, NIRIK_OT_step_construction, NIRIK_OT_add_cycle, NIRIK_OT_select_part, NIRIK_OT_pick,
+classes = (NIRIK_OT_swap, NIRIK_OT_load_character, NIRIK_OT_import_prop, NIRIK_OT_face_camera, NIRIK_OT_step_construction, NIRIK_OT_add_cycle, NIRIK_OT_select_part, NIRIK_OT_pick,
            NIRIK_OT_step_drawing, NIRIK_OT_set_drawing, NIRIK_OT_browse_drawings, NIRIK_OT_layer, NIRIK_OT_depth, NIRIK_OT_set_side, NIRIK_OT_hide, NIRIK_OT_rebuild,
            NIRIK_UL_layers, NIRIK_PT_main, NIRIK_PT_layers, NIRIK_PT_more)
 _keymaps = []
@@ -802,6 +934,7 @@ def register():
                 kmi.properties.mode, kmi.properties.extend = mode, extend
                 _keymaps.append((km, kmi))
         _keymaps.append((km, km.keymap_items.new("nirik.browse_drawings", "D", "PRESS", alt=True)))
+        _keymaps.append((km, km.keymap_items.new("nirik.swap", "D", "PRESS", shift=True, alt=True)))
         for key, step in (("WHEELUPMOUSE", -1), ("WHEELDOWNMOUSE", 1)):
             for ctrl, scope in ((False, "SYMBOL"), (True, "SLOT")):
                 kmi = km.keymap_items.new("nirik.step_drawing", key, "PRESS", alt=True, ctrl=ctrl)

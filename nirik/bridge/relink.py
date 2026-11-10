@@ -78,6 +78,9 @@ def relink(arm) -> bool:
     old_root = arm["nirik_library"]
     arm["nirik_library"] = str(found.resolve())
     char = L.load(found)
+    symbol = arm.get("nirik_symbol")
+    if symbol and symbol in char.rigs:  # a swapped-in symbol: its part of the library
+        char = char.subtree(symbol)
     for im in bpy.data.images:  # textures remember their library too
         if im.get("nirik_library") == old_root:
             im["nirik_library"] = str(char.root)

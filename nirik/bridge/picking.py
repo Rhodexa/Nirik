@@ -14,7 +14,7 @@ import numpy as np
 from mathutils import Vector, geometry
 
 from ..core import library as L
-from . import rig_build
+from . import rig_build, swap
 
 ALPHA_HIT = 0.3          # clicks on faint antialiasing pass through
 ALPHA_MAX_SIZE = 256     # alpha copies are downsampled to this many pixels
@@ -92,7 +92,7 @@ def hits(arm, char: L.Character, origin: Vector, direction: Vector, depsgraph) -
     for name, i in order.items():
         card = rig_build.card_of(arm, name)
         drawing = arm.pose.bones[name]["nirik_drawing"]
-        if card is None or not drawing or card.hide_get() or card.hide_viewport:
+        if card is None or not drawing or card.hide_get() or card.hide_viewport or not swap.card_shown(card):
             continue
         hit = _card_uv(card, depsgraph, origin, direction)
         if hit is None:

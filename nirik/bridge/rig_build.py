@@ -336,8 +336,9 @@ def build_material(char: L.Character, slot: L.Slot, image, mask_image=None, mask
 # ── drivers ──────────────────────────────────────────────────────────────────
 
 def _drive(obj, prop: str, index: int, arm, bone: str, bone_prop: str, bone_index: int | None = None,
-           expression: str = "v", extra: dict[str, str] | None = None):
-    """Drive obj[prop] from a bone property. `expression` must stay a simple
+           expression: str = "v", extra: dict | None = None):
+    """Drive obj[prop] from a bone property; `extra` adds variables, each a
+    data path on `arm` or an (object, data path) pair. `expression` must stay a simple
     expression (arithmetic, comparisons, `a if c else b`): those evaluate
     without Python, so renders never need scripts enabled."""
     path = f'["{prop}"]' if prop != "location" else "location"
@@ -351,10 +352,11 @@ def _drive(obj, prop: str, index: int, arm, bone: str, bone_prop: str, bone_inde
     drv = fc.driver
     drv.type = "SCRIPTED"
     suffix = f"[{bone_index}]" if bone_index is not None else ""
-    for name, data_path in {"v": f'pose.bones["{bone}"]["{bone_prop}"]{suffix}', **(extra or {})}.items():
+    for name, target in {"v": f'pose.bones["{bone}"]["{bone_prop}"]{suffix}', **(extra or {})}.items():
+        owner, data_path = target if isinstance(target, tuple) else (arm, target)
         var = drv.variables.new()
         var.name = name
-        var.targets[0].id = arm
+        var.targets[0].id = owner
         var.targets[0].data_path = data_path
     drv.expression = expression
 

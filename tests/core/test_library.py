@@ -102,6 +102,26 @@ def test_draw_order_expands_child_rigs_and_skips_masks(tmp_path):
                                "Character.Tail"]
 
 
+def test_subtree_is_one_symbol_and_what_it_holds(tmp_path):
+    ch = L.load(write_library(tmp_path))
+    head = ch.subtree("Head")
+    assert head.root_rig == "Head" and list(head.rigs) == ["Head"]
+    assert head.draw_order() == ["Head.IRIS", "Head.EYEWHITE", "Head.SKULL"]
+    assert list(head.drawings) == [2] and head.root == ch.root
+    assert head.groups == [("Eye", ["Head.IRIS"])] and head.cycle is None
+    assert head.rigs["Head"].label == "Head" and ch.rigs["Character"].label == "Test"
+    assert ch.subtree("Character") is ch
+    assert ch.symbols_below("Character") == ["Character", "Head"]
+
+
+def test_order_span_covers_nested_stacks_and_empty_layers(tmp_path):
+    ch = L.load(write_library(tmp_path))
+    assert ch.order_span("Character.Body") == (0, 1)
+    assert ch.order_span("Character.HEAD") == (1, 3)   # iris, eye white, skull
+    assert ch.order_span("Head.EYE mask") == (1, 0)    # masks draw nothing
+    assert ch.order_span("Character.Tail") == (4, 1)
+
+
 def test_rejects_unknown_versions(tmp_path):
     (tmp_path / "character.json").write_text(json.dumps({"schema": 99}))
     with pytest.raises(ValueError):
