@@ -58,6 +58,18 @@ The converter now writes what Nirik used to infer (conventions.py):
   the most material (S08E13, S09E22).
 
 ### Rig structure
+- What stays a symbol and what gets flattened into a drawing is decided by
+  the show's naming: names starting with "~" (the riggers' mark for rigs)
+  stay symbols, everything else is baked into one picture. Another show's
+  files would need another rule. Alternatives: a structural rule (keep a
+  symbol open when it has several frames, or when the census sees
+  animators re-key inside it), or no flattening at all, so the library
+  tree matches the file's tree one to one (2026-11-10)
+- Blank frames in a rig's timeline become an empty pose: the riggers leave
+  blank frames between keyed poses (Twilight's head, frames 146-149,
+  156-159, ...), and identical frames merge, so 21 blank frames became
+  Head pose 30, used by no body pose. Drop poses with nothing in them
+  (2026-11-10)
 - Hooves and similar sub-pieces are flattened into their leg drawings
   (Twilight's legs: upper, lower, hoof, knee patch are one picture). Promote
   nested pieces that move relative to their parent (the census saw
