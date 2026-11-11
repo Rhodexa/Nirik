@@ -122,8 +122,10 @@ Measured 2026-11-09: one pose of Twilight on screen ~49 MB of GPU tiles at
 - **Bendable cards:** a part's card as a grid instead of a quad, so a
   drawing can bend (Simple Deform, lattice, cloth). For things like the
   envelope, tails, manes (2026-11-06)
-- **Vocabulary:** Puppet / Symbol / Node / Pose instead of character / rig /
-  slot / construction; rename UI and format together (2026-11-06)
+- **Shape instead of Drawing:** the leaf a layer shows is a shape (Flash's
+  word for drawing data on a frame). Generic, and still right when shapes
+  become vectors. Rename UI and format together, with the next format
+  version (2026-11-10)
 - **Lip sync** from audio, keyed by the mouth drawings' phoneme tags;
   real-time from a microphone as a toy (2026-11-02)
 

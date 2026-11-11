@@ -65,6 +65,16 @@ The converter now writes what Nirik used to infer (conventions.py):
   symbol open when it has several frames, or when the census sees
   animators re-key inside it), or no flattening at all, so the library
   tree matches the file's tree one to one (2026-11-10)
+- Measured on Princess Twilight (131 symbols): 95 hold only shapes, 29
+  hold only those (legs, wings, mane, blinks, lashes, horn magic), 5 go
+  one deeper (the 3/4 and side mouth charts, brows), then the head and the
+  body. Depth alone can't be the rule: mouths sit deeper than legs, yet
+  animators pick a mouth whole and pose a leg's parts. The rule wants
+  evidence from shots: open a symbol where animators key inside it, flatten
+  where they only pick its frames. The foreleg (PTS_FrontLeg_3-4) is a
+  small rig: 4 numbered layers, 12 frames placing upper, lower, hoof and
+  hoof wrinkle, with the hoof moving between layers across frames (layers
+  as draw-order places, not parts) (2026-11-10)
 - Blank frames in a rig's timeline become an empty pose: the riggers leave
   blank frames between keyed poses (Twilight's head, frames 146-149,
   156-159, ...), and identical frames merge, so 21 blank frames became
